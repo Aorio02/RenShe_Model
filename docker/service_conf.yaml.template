@@ -8,7 +8,7 @@ mysql:
   name: '${MYSQL_DBNAME:-rag_flow}'
   user: '${MYSQL_USER:-root}'
   password: '${MYSQL_PASSWORD:-infini_rag_flow}'
-  host: '{MYSQL_HOST:-mysql}'
+  host: '${MYSQL_HOST:-mysql}'
   port: 3306
   max_connections: 900
   stale_timeout: 300
@@ -16,7 +16,7 @@ mysql:
 minio:
   user: '${MINIO_USER:-rag_flow}'
   password: '${MINIO_PASSWORD:-infini_rag_flow}'
-  host: '{MINIO_HOST:-minio}:9000'
+  host: '${MINIO_HOST:-minio}:9000'
   bucket: '${MINIO_BUCKET:-}'
   prefix_path: '${MINIO_PREFIX_PATH:-}'
 es:
@@ -28,7 +28,7 @@ os:
   username: '${OS_USER:-admin}'
   password: '${OPENSEARCH_PASSWORD:-infini_rag_flow_OS_01}'
 infinity:
-  uri: '{INFINITY_HOST:-infinity}:23817'
+  uri: '${INFINITY_HOST:-infinity}:23817'
   db_name: 'default_db'
 oceanbase:
   scheme: 'oceanbase' # set 'mysql' to create connection using mysql config
@@ -42,7 +42,7 @@ redis:
   db: 1
   username: '${REDIS_USERNAME:-}'
   password: '${REDIS_PASSWORD:-infini_rag_flow}'
-  host: '{REDIS_HOST:-redis}:6379'
+  host: '${REDIS_HOST:-redis}:6379'
 user_default_llm:
   default_models:
     embedding_model:
