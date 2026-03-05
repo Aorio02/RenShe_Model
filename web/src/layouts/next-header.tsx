@@ -77,9 +77,9 @@ export function Header() {
       { path: Routes.Root, name: t('header.Root'), icon: House },
       { path: Routes.Datasets, name: t('header.dataset'), icon: Library },
       { path: Routes.Chats, name: t('header.chat'), icon: MessageSquareText },
-      // { path: Routes.Searches, name: t('header.search'), icon: Search },
-      // { path: Routes.Agents, name: t('header.flow'), icon: Cpu },
-      // { path: Routes.Memories, name: t('header.memories'), icon: Cpu },
+      { path: Routes.Searches, name: t('header.search'), icon: Search },
+      { path: Routes.Agents, name: t('header.flow'), icon: Cpu },
+      { path: Routes.Memories, name: t('header.memories'), icon: Cpu },
       { path: Routes.Files, name: t('header.fileManager'), icon: File },
     ],
     [t],
@@ -147,7 +147,7 @@ export function Header() {
         activeClassName="text-bg-base bg-metallic-gradient border-b-[#00BEB4] border-b-2"
       ></Segmented>
       <div className="flex items-center gap-5 text-text-badge">
-        {/* <a
+        <a
           target="_blank"
           href="https://discord.com/invite/NjYzJD3GM3"
           rel="noreferrer"
@@ -160,7 +160,7 @@ export function Header() {
           rel="noreferrer"
         >
           <IconFontFill name="GitHub"></IconFontFill>
-        </a> */}
+        </a>
         <DropdownMenu>
           <DropdownMenuTrigger>
             <div className="flex items-center gap-1">
@@ -176,9 +176,9 @@ export function Header() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {/* <Button variant={'ghost'} onClick={handleDocHelpCLick}>
+        <Button variant={'ghost'} onClick={handleDocHelpCLick}>
           <CircleHelp />
-        </Button> */}
+        </Button>
         <Button variant={'ghost'} onClick={onThemeClick}>
           {theme === 'light' ? <Sun /> : <Moon />}
         </Button>
