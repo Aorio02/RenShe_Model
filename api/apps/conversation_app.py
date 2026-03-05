@@ -486,13 +486,9 @@ async def export_conversation():
     social_security_number = req["social_security_number"]
     logging.info(f"导出会话 {conversation_id}，用户社保号 {social_security_number}")
     
-    # 1. 验证社保号（暂时直接返回true）
-    def verify_social_security_number(conv_id, ssn):
-        # TODO: 暂时直接返回true，后续可实现实际验证逻辑
-        return True
-    
-    if not verify_social_security_number(conversation_id, social_security_number):
-        return get_data_error_result(message="社保号与会话不一致")
+    # 1. 验证社保号
+    if not verify_social_security_number(social_security_number):
+        return get_data_error_result(message="社保号不匹配")
     
     # 2. 查询会话数据
     e, conv = ConversationService.get_by_id(conversation_id)
@@ -520,6 +516,13 @@ async def export_conversation():
     response.headers['Content-Type'] = 'text/markdown; charset=utf-8'
     response.headers['Content-Disposition'] = disposition        
     return response
+
+def verify_social_security_number(social_security_number):
+    """验证社保号是否正确"""
+    # 写死的社保号，用于测试
+    #TODO: 从数据库中查询用户的社保号进行验证
+    valid_social_security_number = "110101199003074567"
+    return social_security_number == valid_social_security_number
 
 def generate_markdown(messages):
     """将会话消息转换为Markdown格式"""
