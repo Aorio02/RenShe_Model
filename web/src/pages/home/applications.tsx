@@ -71,14 +71,14 @@ export function Applications() {
           />
           {options.find((x) => x.value === val)?.label}
         </h2>
-        <Segmented
+        {/* <Segmented
           options={options}
           value={val}
           onChange={handleChange}
           buttonSize="xl"
           // className="bg-bg-card border border-border-button rounded-lg"
           // activeClassName="bg-text-primary border-none rounded-lg"
-        ></Segmented>
+        ></Segmented> */}
       </div>
       {/* <div className="flex flex-wrap gap-4"> */}
       <CardSineLineContainer>

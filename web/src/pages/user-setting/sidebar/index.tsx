@@ -18,12 +18,12 @@ import { useTranslation } from 'react-i18next';
 import { useHandleMenuClick } from './hooks';
 
 const menuItems = (t: TFunction) => [
-  { icon: Server, label: t('setting.dataSources'), key: Routes.DataSource },
+  // { icon: Server, label: t('setting.dataSources'), key: Routes.DataSource },
   { icon: Box, label: t('setting.model'), key: Routes.Model },
   { icon: Banknote, label: 'MCP', key: Routes.Mcp },
-  { icon: Users, label: t('setting.team'), key: Routes.Team },
-  { icon: User, label: t('setting.profile'), key: Routes.Profile },
-  { icon: Unplug, label: t('setting.api'), key: Routes.Api },
+  // { icon: Users, label: t('setting.team'), key: Routes.Team },
+  // { icon: User, label: t('setting.profile'), key: Routes.Profile },
+  // { icon: Unplug, label: t('setting.api'), key: Routes.Api },
   // {
   //   icon: MessageSquareQuote,
   //   label: 'Prompt Templates',

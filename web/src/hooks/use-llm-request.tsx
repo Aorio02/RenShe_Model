@@ -186,14 +186,17 @@ export const useComposeLlmOptionsByModelTypes = (
 };
 
 export const useFetchLlmFactoryList = (): ResponseGetType<IFactory[]> => {
+  const ALLOWED_FACTORIES = ['OpenAI', 'DeepSeek', 'Ollama'];
   const { data, isFetching: loading } = useQuery({
     queryKey: [LLMApiAction.FactoryList],
     initialData: [],
     gcTime: 0,
     queryFn: async () => {
       const { data } = await userService.factories_list();
-
-      return data?.data ?? [];
+      const filteredFactories = (data?.data ?? []).filter((factory: { name: string; }) => 
+        ALLOWED_FACTORIES.includes(factory.name)
+      );
+      return filteredFactories;
     },
   });
 
