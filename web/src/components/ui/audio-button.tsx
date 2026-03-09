@@ -1,5 +1,4 @@
 import { AudioRecorder, useAudioRecorder } from 'react-audio-voice-recorder';
-
 import { Button } from '@/components/ui/button';
 import { Authorization } from '@/constants/authorization';
 import { cn } from '@/lib/utils';
@@ -7,145 +6,93 @@ import api from '@/utils/api';
 import { getAuthorization } from '@/utils/authorization-util';
 import { Loader2, Mic, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useIsDarkTheme } from '../theme-provider';
+import { toast } from 'sonner';
 import { Input } from './input';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 const VoiceVisualizer = ({ isRecording }: { isRecording: boolean }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
-  const isDark = useIsDarkTheme();
 
   const startVisualization = async () => {
     try {
-      // Check if the browser supports getUserMedia
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        console.error('Browser does not support getUserMedia API');
-        return;
-      }
-      // Request microphone permission
+      if (!navigator.mediaDevices?.getUserMedia) return;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-
-      // Create audio context and analyzer
-      const audioContext = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const audioContext = new AudioContextClass();
       audioContextRef.current = audioContext;
-
       const analyser = audioContext.createAnalyser();
       analyserRef.current = analyser;
       analyser.fftSize = 32;
-
-      // Connect audio nodes
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
-
-      // Start drawing
       draw();
-    } catch (error) {
-      console.error(
-        'Unable to access microphone for voice visualization:',
-        error,
-      );
+    } catch (error: any) {
+      console.warn('Visualizer init failed:', error.message);
     }
   };
 
   const stopVisualization = () => {
-    // Stop animation frame
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-
-    // Stop audio stream
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
-
-    // Close audio context
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close();
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state !== 'closed') audioContextRef.current.close();
+      audioContextRef.current = null;
     }
-
-    // Clear canvas
     const canvas = canvasRef.current;
     if (canvas) {
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
   };
-  useEffect(() => {
-    if (isRecording) {
-      startVisualization();
-    } else {
-      stopVisualization();
-    }
 
-    return () => {
-      stopVisualization();
-    };
+  useEffect(() => {
+    if (isRecording) startVisualization();
+    else stopVisualization();
+    return () => stopVisualization();
   }, [isRecording]);
+
   const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
     const analyser = analyserRef.current;
     if (!analyser) return;
-
-    // Set canvas dimensions
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     const centerY = height / 2;
-
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
     }
-
-    // Clear canvas
     ctx.clearRect(0, 0, width, height);
-
-    // Get frequency data
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
     analyser.getByteFrequencyData(dataArray);
-
-    // Draw waveform
     const barWidth = (width / bufferLength) * 1.5;
     let x = 0;
-
     for (let i = 0; i < bufferLength; i = i + 2) {
       const barHeight = (dataArray[i] / 255) * centerY;
-
-      // Create gradient
-      const gradient = ctx.createLinearGradient(
-        0,
-        centerY - barHeight,
-        0,
-        centerY + barHeight,
-      );
-      gradient.addColorStop(0, '#3ba05c'); // Blue
-      gradient.addColorStop(1, '#3ba05c'); // Light blue
-      // gradient.addColorStop(0, isDark ? '#fff' : '#000'); // Blue
-      // gradient.addColorStop(1, isDark ? '#eee' : '#eee'); // Light blue
-
+      const gradient = ctx.createLinearGradient(0, centerY - barHeight, 0, centerY + barHeight);
+      gradient.addColorStop(0, '#3ba05c');
+      gradient.addColorStop(1, '#3ba05c');
       ctx.fillStyle = gradient;
       ctx.fillRect(x, centerY - barHeight, barWidth, barHeight * 2);
-
       x += barWidth + 2;
     }
-
     animationFrameRef.current = requestAnimationFrame(draw);
   };
 
   return (
-    <div className="w-full h-6 bg-transparent flex items-center justify-center overflow-hidden ">
+    <div className="w-full h-6 bg-transparent flex items-center justify-center overflow-hidden">
       <canvas ref={canvasRef} className="w-full h-full" />
     </div>
   );
@@ -162,7 +109,6 @@ const VoiceInputBox = ({
   onStop: () => void;
   recordingTime: number;
 }) => {
-  // Format recording time
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -170,251 +116,232 @@ const VoiceInputBox = ({
   };
 
   return (
-    <div className="w-full">
-      <div className=" absolute w-full h-6 translate-y-full">
+    <div className="w-full relative">
+      <div className="absolute w-full h-6 translate-y-1 opacity-80 pointer-events-none">
         <VoiceVisualizer isRecording={isRecording} />
       </div>
       <Input
-        rootClassName="w-full"
-        className="flex-1 "
+        rootClassName="w-full relative z-10"
+        className="flex-1 bg-white/90 dark:bg-black/90 backdrop-blur-sm"
         readOnly
         value={value}
+        placeholder={isRecording ? "正在录音..." : "点击麦克风开始"}
         suffix={
           <div className="flex justify-end px-1 items-center gap-1 w-20">
-            <Button
-              variant={'ghost'}
-              size="sm"
-              className="text-text-primary p-1 border-none hover:bg-transparent"
-              onClick={onStop}
-            >
-              <Square className="text-text-primary" size={12} />
-            </Button>
-            <span className="text-xs text-text-secondary">
-              {formatTime(recordingTime)}
-            </span>
+            {isRecording && (
+              <Button
+                variant={'ghost'}
+                size="sm"
+                className="text-red-500 p-1 border-none hover:bg-red-50 dark:hover:bg-red-900/20"
+                onClick={(e) => { e.stopPropagation(); onStop(); }}
+              >
+                <Square className="fill-current" size={12} />
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground font-mono">{formatTime(recordingTime)}</span>
           </div>
         }
       />
     </div>
   );
 };
-export const AudioButton = ({
-  onOk,
-}: {
-  onOk?: (transcript: string) => void;
-}) => {
-  // const [showInputBox, setShowInputBox] = useState(false);
+
+export const AudioButton = ({ onOk }: { onOk?: (transcript: string) => void }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const recorderControls = useAudioRecorder();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  // Handle logic after recording is complete
+
+  useEffect(() => {
+    if (recorderControls && !isReady) {
+      const timer = setTimeout(() => setIsReady(true), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [recorderControls, isReady]);
+
   const handleRecordingComplete = async (blob: Blob) => {
     setIsRecording(false);
-
-    // const url = URL.createObjectURL(blob);
-    // const a = document.createElement('a');
-    // a.href = url;
-    // a.download = 'recording.webm';
-    // document.body.appendChild(a);
-    // a.click();
-
-    setIsProcessing(true);
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
     try {
-      const audioFile = new File([blob], 'recording.webm', {
-        type: blob.type || 'audio/webm',
-        // type: 'audio/mpeg',
-      });
+      const now = new Date();
+      const timeStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const fileName = `recording_${timeStr}.webm`;
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast.success('录音已保存', { description: `文件：${fileName}` });
+    } catch (err) {
+      console.error('Save file error:', err);
+      toast.error('保存文件失败');
+    }
 
+    setIsProcessing(true);
+    
+    try {
+      const audioFile = new File([blob], 'recording.webm', { type: blob.type || 'audio/webm' });
       const formData = new FormData();
       formData.append('file', audioFile);
       formData.append('stream', 'false');
+      
+      // 可选：如果后端需要 model 参数，可以在这里加上
+      // formData.append('model', 'default'); 
 
       const response = await fetch(api.sequence2txt, {
         method: 'POST',
-        headers: {
-          [Authorization]: getAuthorization(),
-          // 'Content-Type': blob.type || 'audio/webm',
-        },
+        headers: { [Authorization]: getAuthorization() },
         body: formData,
       });
 
-      // if (!response.ok) {
-      //   throw new Error(`HTTP error! status: ${response.status}`);
-      // }
+      if (!response.ok) throw new Error(`服务器错误: ${response.status}`);
 
-      // if (!response.body) {
-      //   throw new Error('ReadableStream not supported in this browser');
-      // }
+      const resJson = await response.json();
+      const { data, code, message } = resJson;
 
-      console.log('Response:', response);
-      const { data, code } = await response.json();
-      if (code === 0 && data && data.text) {
-        setTranscript(data.text);
-        console.log('Transcript:', data.text);
-        onOk?.(data.text);
+      if (code === 0 && data?.text) {
+        const text = data.text.trim();
+        setTranscript(text);
+        if (text) {
+          toast.success('识别成功');
+          onOk?.(text);
+          setTimeout(() => {
+            setPopoverOpen(false);
+            setTranscript('');
+          }, 500);
+        } else {
+          toast.warning('未识别到内容');
+          setPopoverOpen(false);
+        }
+      } else {
+        throw new Error(message || '识别结果为空');
       }
+    } catch (error: any) {
+      console.error('STT Error:', error);
+      toast.error('识别失败', { 
+        description: error.message || '请稍后重试 (录音文件已保存)' 
+      });
       setPopoverOpen(false);
-    } catch (error) {
-      console.error('Failed to process audio:', error);
-      // setTranscript(t('voiceRecorder.processingError'));
     } finally {
       setIsProcessing(false);
     }
   };
 
-  //  Start recording
-  const startRecording = () => {
-    recorderControls.startRecording();
-    setIsRecording(true);
-    // setShowInputBox(true);
-    setPopoverOpen(true);
-    setRecordingTime(0);
-
-    // Start timing
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
+  const startRecording = async () => {
+    if (!isReady) {
+      toast.warning('音频模块初始化中...', { description: '请稍等 1 秒再试' });
+      return;
     }
-    intervalRef.current = setInterval(() => {
-      setRecordingTime((prev) => prev + 1);
-    }, 1000);
+    try {
+      setTranscript('');
+      setRecordingTime(0);
+      recorderControls.startRecording();
+      setIsRecording(true);
+      setPopoverOpen(true);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(() => setRecordingTime((prev) => prev + 1), 1000);
+    } catch (error: any) {
+      console.error('Start Recording Exception:', error);
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        toast.error('不安全的环境', { description: 'Chrome 要求麦克风必须在 HTTPS 或 localhost 下使用。' });
+      } else {
+        toast.error('无法启动录音', { description: error.message });
+      }
+      setIsRecording(false);
+    }
   };
 
-  // Stop recording
   const stopRecording = () => {
-    recorderControls.stopRecording();
-    setIsRecording(false);
-    // setShowInputBox(false);
-    setPopoverOpen(false);
-    setRecordingTime(0);
-
-    // Clear timer
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+    try { recorderControls.stopRecording(); } catch (e) { console.error(e); }
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
   };
-
-  //  Clear transcription content
-  // const clearTranscript = () => {
-  //   setTranscript('');
-  // };
 
   useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
+
   return (
-    <div>
-      {false && (
-        <div className="flex flex-col items-center space-y-4">
-          <div className="relative">
-            <Popover
-              open={popoverOpen}
-              onOpenChange={(open) => {
-                setPopoverOpen(true);
-              }}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (isRecording) {
-                      stopRecording();
-                    } else {
-                      startRecording();
-                    }
-                  }}
-                  className={`w-6 h-6 p-2 rounded-full border-none bg-transparent hover:bg-transparent ${
-                    isRecording ? 'animate-pulse' : ''
-                  }`}
-                  disabled={isProcessing}
-                >
-                  <Mic size={16} className="text-text-primary" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                sideOffset={-20}
-                className="p-0 border-none"
-              >
-                <VoiceInputBox
-                  isRecording={isRecording}
-                  value={transcript}
-                  onStop={stopRecording}
-                  recordingTime={recordingTime}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
+    <div className="relative w-6 h-6 flex items-center justify-center">
+      {isRecording && (
+        <div className="absolute inset-0 rounded-full border-2 border-state-success-500 animate-ping opacity-75"></div>
+      )}
+      
+      {isRecording && (
+        <div className="absolute inset-0 w-full h-6 rounded-md overflow-hidden flex items-center justify-center p-1 z-10 pointer-events-none">
+           <VoiceVisualizer isRecording={isRecording} />
         </div>
       )}
 
-      <div className=" relative w-6 h-6 flex items-center justify-center">
-        {isRecording && (
-          <div
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (isProcessing) return;
+              if (isRecording) stopRecording();
+              else startRecording();
+            }}
             className={cn(
-              'absolute inset-0 w-full h-6 rounded-full overflow-hidden flex items-center justify-center p-1',
-              { 'bg-state-success-5': isRecording },
+              "w-6 h-6 p-0 rounded-md border-none transition-all duration-200",
+              isRecording 
+                ? "bg-state-success-100 text-state-success hover:bg-state-success-200" 
+                : "hover:bg-muted text-muted-foreground hover:text-foreground",
+              isProcessing && "cursor-not-allowed opacity-70"
             )}
+            disabled={isProcessing || !isReady}
+            title={!isReady ? "初始化中..." : (isRecording ? "停止录音" : "语音输入")}
           >
-            <VoiceVisualizer isRecording={isRecording} />
-          </div>
-        )}
-        {isRecording && (
-          <div className="absolute inset-0 rounded-full border-2 border-state-success animate-ping opacity-75"></div>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          // onMouseDown={() => {
-          //   startRecording();
-          // }}
-          // onMouseUp={() => {
-          //   stopRecording();
-          // }}
-          onClick={() => {
-            if (isRecording) {
-              stopRecording();
-            } else {
-              startRecording();
-            }
-          }}
-          className={`w-6 h-6 p-2 rounded-md border-none bg-transparent hover:bg-state-success-5 ${
-            isRecording
-              ? 'animate-pulse bg-state-success-5 text-state-success'
-              : ''
-          }`}
-          disabled={isProcessing}
+            {isProcessing ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : isRecording ? (
+              <Square size={14} className="fill-current opacity-80" />
+            ) : (
+              <Mic size={16} />
+            )}
+          </Button>
+        </PopoverTrigger>
+        
+        <PopoverContent 
+          align="center" 
+          side="top" 
+          sideOffset={10} 
+          className="w-64 p-2 shadow-lg border-none bg-popover/95 backdrop-blur"
+          onCloseAutoFocus={(e) => e.preventDefault()}
         >
-          {isProcessing ? (
-            <Loader2 size={16} className=" animate-spin" />
-          ) : isRecording ? (
-            <></>
-          ) : (
-            // <Mic size={16} className="text-text-primary" />
-            // <Square size={12} className="text-text-primary" />
-            <Mic size={16} />
-          )}
-        </Button>
-      </div>
+          <VoiceInputBox
+            isRecording={isRecording}
+            value={transcript}
+            onStop={stopRecording}
+            recordingTime={recordingTime}
+          />
+          {isProcessing && <div className="text-xs text-center text-muted-foreground mt-1">正在识别...</div>}
+          {!isReady && <div className="text-xs text-center text-yellow-600 mt-1">正在加载音频模块...</div>}
+        </PopoverContent>
+      </Popover>
 
-      {/* Hide original component */}
-      <div className="hidden">
+      <div style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0, overflow: 'hidden' }}>
         <AudioRecorder
           onRecordingComplete={handleRecordingComplete}
           recorderControls={recorderControls}
+          audioTrackConstraints={{ noiseSuppression: true, echoCancellation: true }}
+          mediaRecorderOptions={{ mimeType: 'audio/webm' }}
         />
       </div>
     </div>

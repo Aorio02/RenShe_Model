@@ -22,24 +22,18 @@ export function RenameForm({
   initialName,
   hideModal,
   onOk,
-  initialSocialSecurityNumber,
   initialDate,
 }: IModalProps<any> & { 
   initialName?: string;
-  initialSocialSecurityNumber?: string;
   initialDate?: string;
 }) {
   const { t } = useTranslation();
+
   const FormSchema = z.object({
     name: z
       .string()
       .min(1, {
         message: t('common.namePlaceholder'),
-      })
-      .trim(),
-    socialSecurityNumber: z.string()
-      .regex(/^\d{10,18}$/, {
-        message: t('common.socialSecurityNumberError'),
       })
       .trim(),
     date: z.string()
@@ -53,7 +47,6 @@ export function RenameForm({
     resolver: zodResolver(FormSchema),
     defaultValues: { 
       name: '',
-      socialSecurityNumber: '',
       date: ''
     },
   });
@@ -69,13 +62,10 @@ export function RenameForm({
     if (initialName) {
       form.setValue('name', initialName);
     }
-    if (initialSocialSecurityNumber) {
-      form.setValue('socialSecurityNumber', initialSocialSecurityNumber);
-    }
     if (initialDate) {
       form.setValue('date', initialDate);
     }
-  }, [form, initialName, initialSocialSecurityNumber, initialDate]);
+  }, [form, initialName, initialDate]);
 
   return (
     <Form {...form}>
@@ -95,26 +85,6 @@ export function RenameForm({
                   placeholder={t('common.namePlaceholder')}
                   {...field}
                   autoComplete="off"
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        {/* 社保卡号输入框 */}
-        <FormField
-          control={form.control}
-          name="socialSecurityNumber"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>{t('common.socialSecurityNumber')}</FormLabel>
-              <FormControl>
-                <Input
-                  placeholder={t('common.socialSecurityNumberPlaceholder')}
-                  {...field}
-                  autoComplete="off"
-                  inputMode="numeric"
                 />
               </FormControl>
               <FormMessage />
