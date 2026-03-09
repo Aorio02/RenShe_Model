@@ -149,7 +149,7 @@ if __name__ == '__main__':
     try:
         logging.info(f"RAGFlow server is ready after {time.time() - start_ts}s initialization.")
         test_port = 9388
-        app.run(host=settings.HOST_IP, port=9388)
+        app.run(host=settings.HOST_IP, port=settings.HOST_PORT)
     except Exception:
         traceback.print_exc()
         stop_event.set()

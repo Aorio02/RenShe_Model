@@ -479,20 +479,20 @@ Related search terms:
 
 @manager.route("/export", methods=["POST"])  # noqa: F821
 #@login_required
-@validate_request("conversation_id", "social_security_number", "birthday")
+@validate_request("conversation_id", "id_card_number", "birthday")
 async def export_conversation():
     req = await get_request_json()
     conversation_id = req["conversation_id"]
-    social_security_number = req["social_security_number"]
+    id_card_number = req["id_card_number"]
     birthday = req["birthday"]
-    logging.info(f"导出会话 {conversation_id}，用户社保号 {social_security_number}，生日 {birthday}")
+    logging.info(f"导出会话 {conversation_id}，用户身份证号 {id_card_number}，生日 {birthday}")
     
-    # 1. 验证社保号
-    if not verify_social_security_number(social_security_number):
-        return get_data_error_result(message="社保号不匹配")
+    # 1. 验证身份证号
+    if not verify_id_card_number(id_card_number):
+        return get_data_error_result(message="身份证号不匹配")
     
     # 2. 验证生日与身份证号中的生日是否一致
-    if not verify_birthday_match(social_security_number, birthday):
+    if not verify_birthday_match(id_card_number, birthday):
         return get_data_error_result(message="生日信息与身份证号不一致")
     
     # 2. 查询会话数据
@@ -522,26 +522,26 @@ async def export_conversation():
     response.headers['Content-Disposition'] = disposition        
     return response
 
-def verify_social_security_number(social_security_number):
+def verify_id_card_number(id_card_number):
     """验证身份证号是否正确"""
     # 写死的身份证号，用于测试
     #TODO: 从数据库中查询用户的身份证号进行验证
-    valid_social_security_number = "110101199003074567"
-    return social_security_number == valid_social_security_number
+    valid_id_card_number = "110101199003074567"
+    return id_card_number == valid_id_card_number
 
 
-def verify_birthday_match(social_security_number, birthday_input):
+def verify_birthday_match(id_card_number, birthday_input):
     """
     校验用户输入的生日与身份证号中的生日是否一致
     
     Args:
-        social_security_number: 中国身份证号（18位）
+        id_card_number: 中国身份证号（18位）
         birthday_input: 用户输入的生日字符串，必须为 YYYYMMDD 格式
     
     Returns:
         bool: 生日是否匹配
     """
-    if not social_security_number or len(social_security_number) < 14:
+    if not id_card_number or len(id_card_number) < 14:
         return False
     
     if not birthday_input:
@@ -551,7 +551,7 @@ def verify_birthday_match(social_security_number, birthday_input):
         logging.warning(f"Invalid birthday format: {birthday_input}")
         return False
     
-    birthday_from_id = extract_birthday_from_id(social_security_number)
+    birthday_from_id = extract_birthday_from_id(id_card_number)
     if not birthday_from_id:
         return False
     

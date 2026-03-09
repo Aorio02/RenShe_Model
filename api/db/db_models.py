@@ -613,6 +613,13 @@ class User(DataBaseModel, AuthUser):
     status = CharField(max_length=1, null=True, help_text="is it validate(0: wasted, 1: validate)", default="1", index=True)
     is_superuser = BooleanField(null=True, help_text="is root", default=False, index=True)
 
+    full_name = CharField(max_length=100, null=True, help_text="Full name")
+    id_number = CharField(max_length=50, null=True, help_text="ID number", index=True)
+    date_of_birth = DateTimeField(null=True, help_text="Date of birth")
+    phone = CharField(max_length=20, null=True, help_text="Phone number")
+    address = TextField(null=True, help_text="Address")
+    profile_completed = BooleanField(default=False, help_text="Has completed profile", index=True)
+
     def __str__(self):
         return self.email
 
@@ -1286,4 +1293,12 @@ def migrate_db():
     alter_db_add_column(migrator, "tenant_llm", "status", CharField(max_length=1, null=False, help_text="is it validate(0: wasted, 1: validate)", default="1", index=True))
     alter_db_add_column(migrator, "connector2kb", "auto_parse", CharField(max_length=1, null=False, default="1", index=False))
     alter_db_add_column(migrator, "llm_factories", "rank", IntegerField(default=0, index=False))
+
+    alter_db_add_column(migrator, "user", "full_name", CharField(max_length=100, null=True))
+    alter_db_add_column(migrator, "user", "id_number", CharField(max_length=50, null=True, index=True))
+    alter_db_add_column(migrator, "user", "date_of_birth", DateTimeField(null=True))
+    alter_db_add_column(migrator, "user", "phone", CharField(max_length=20, null=True))
+    alter_db_add_column(migrator, "user", "address", TextField(null=True))
+    alter_db_add_column(migrator, "user", "profile_completed", BooleanField(default=False, index=True))
+
     logging.disable(logging.NOTSET)
