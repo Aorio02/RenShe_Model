@@ -22,7 +22,13 @@ export function RenameForm({
   initialName,
   hideModal,
   onOk,
-}: IModalProps<any> & { initialName?: string }) {
+  initialSocialSecurityNumber,
+  initialDate,
+}: IModalProps<any> & { 
+  initialName?: string;
+  initialSocialSecurityNumber?: string;
+  initialDate?: string;
+}) {
   const { t } = useTranslation();
   const FormSchema = z.object({
     name: z
@@ -31,15 +37,29 @@ export function RenameForm({
         message: t('common.namePlaceholder'),
       })
       .trim(),
+    socialSecurityNumber: z.string()
+      .regex(/^\d{10,18}$/, {
+        message: t('common.socialSecurityNumberError'),
+      })
+      .trim(),
+    date: z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, {
+        message: t('common.dateFormatError'),
+      })
+      .trim(),
   });
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
-    defaultValues: { name: '' },
+    defaultValues: { 
+      name: '',
+      socialSecurityNumber: '',
+      date: ''
+    },
   });
 
   async function onSubmit(data: z.infer<typeof FormSchema>) {
-    const ret = await onOk?.(data.name);
+    const ret = await onOk?.(data);
     if (ret) {
       hideModal?.();
     }
@@ -49,7 +69,13 @@ export function RenameForm({
     if (initialName) {
       form.setValue('name', initialName);
     }
-  }, [form, initialName]);
+    if (initialSocialSecurityNumber) {
+      form.setValue('socialSecurityNumber', initialSocialSecurityNumber);
+    }
+    if (initialDate) {
+      form.setValue('date', initialDate);
+    }
+  }, [form, initialName, initialSocialSecurityNumber, initialDate]);
 
   return (
     <Form {...form}>
@@ -69,6 +95,46 @@ export function RenameForm({
                   placeholder={t('common.namePlaceholder')}
                   {...field}
                   autoComplete="off"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* 社保卡号输入框 */}
+        <FormField
+          control={form.control}
+          name="socialSecurityNumber"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('common.socialSecurityNumber')}</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder={t('common.socialSecurityNumberPlaceholder')}
+                  {...field}
+                  autoComplete="off"
+                  inputMode="numeric"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* 年月日输入框 */}
+        <FormField
+          control={form.control}
+          name="date"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('common.date')}</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder={t('common.datePlaceholder')}
+                  {...field}
+                  autoComplete="off"
+                  type="date"
                 />
               </FormControl>
               <FormMessage />
