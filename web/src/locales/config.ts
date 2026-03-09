@@ -76,10 +76,13 @@ i18n
   .init({
     detection: {
       lookupLocalStorage: 'lng',
+      order: ['localStorage', 'navigator', 'cookie'],
+      caches: ['localStorage'],
     },
     supportedLngs: Object.values(LanguageAbbreviation),
     resources,
-    fallbackLng: 'en',
+    lng: LanguageAbbreviation.Zh,
+    fallbackLng: LanguageAbbreviation.Zh,
     interpolation: {
       escapeValue: false,
     },

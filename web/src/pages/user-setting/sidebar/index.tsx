@@ -12,26 +12,14 @@ import {
 import { cn } from '@/lib/utils';
 import { Routes } from '@/routes';
 import { TFunction } from 'i18next';
-import { Banknote, Box, Server, Unplug, User, Users } from 'lucide-react';
+import { Banknote, Box } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useHandleMenuClick } from './hooks';
 
 const menuItems = (t: TFunction) => [
-  { icon: Server, label: t('setting.dataSources'), key: Routes.DataSource },
   { icon: Box, label: t('setting.model'), key: Routes.Model },
   { icon: Banknote, label: 'MCP', key: Routes.Mcp },
-  { icon: Users, label: t('setting.team'), key: Routes.Team },
-  { icon: User, label: t('setting.profile'), key: Routes.Profile },
-  { icon: Unplug, label: t('setting.api'), key: Routes.Api },
-  // {
-  //   icon: MessageSquareQuote,
-  //   label: 'Prompt Templates',
-  //   key: Routes.Profile,
-  // },
-  // { icon: TextSearch, label: 'Retrieval Templates', key: Routes.Profile },
-  // { icon: Cog, label: t('setting.system'), key: Routes.System },
-  // { icon: Banknote, label: 'Plan', key: Routes.Plan },
 ];
 export function SideBar() {
   const pathName = useSecondPathName();
@@ -78,14 +66,6 @@ export function SideBar() {
                     )}
                     <span>{item.label}</span>
                   </section>
-                  {/* {item.key === Routes.System && (
-                    <div className="mr-2 px-2 bg-accent-primary-5 text-accent-primary rounded-md">
-                      {version}
-                    </div>
-                  )} */}
-                  {/* {active && (
-                    <div className="absolute right-0 w-[5px] h-[66px] bg-primary rounded-l-xl shadow-[0_0_5.94px_#7561ff,0_0_11.88px_#7561ff,0_0_41.58px_#7561ff,0_0_83.16px_#7561ff,0_0_142.56px_#7561ff,0_0_249.48px_#7561ff]" />
-                  )} */}
                 </Button>
               </div>
             </div>
