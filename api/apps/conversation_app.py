@@ -479,16 +479,21 @@ Related search terms:
 
 @manager.route("/export", methods=["POST"])  # noqa: F821
 #@login_required
-@validate_request("conversation_id", "social_security_number")
+@validate_request("conversation_id", "social_security_number", "birthday")
 async def export_conversation():
     req = await get_request_json()
     conversation_id = req["conversation_id"]
     social_security_number = req["social_security_number"]
-    logging.info(f"导出会话 {conversation_id}，用户社保号 {social_security_number}")
+    birthday = req["birthday"]
+    logging.info(f"导出会话 {conversation_id}，用户社保号 {social_security_number}，生日 {birthday}")
     
     # 1. 验证社保号
     if not verify_social_security_number(social_security_number):
         return get_data_error_result(message="社保号不匹配")
+    
+    # 2. 验证生日与身份证号中的生日是否一致
+    if not verify_birthday_match(social_security_number, birthday):
+        return get_data_error_result(message="生日信息与身份证号不一致")
     
     # 2. 查询会话数据
     e, conv = ConversationService.get_by_id(conversation_id)
@@ -518,11 +523,94 @@ async def export_conversation():
     return response
 
 def verify_social_security_number(social_security_number):
-    """验证社保号是否正确"""
-    # 写死的社保号，用于测试
-    #TODO: 从数据库中查询用户的社保号进行验证
+    """验证身份证号是否正确"""
+    # 写死的身份证号，用于测试
+    #TODO: 从数据库中查询用户的身份证号进行验证
     valid_social_security_number = "110101199003074567"
     return social_security_number == valid_social_security_number
+
+
+def verify_birthday_match(social_security_number, birthday_input):
+    """
+    校验用户输入的生日与身份证号中的生日是否一致
+    
+    Args:
+        social_security_number: 中国身份证号（18位）
+        birthday_input: 用户输入的生日字符串，必须为 YYYYMMDD 格式
+    
+    Returns:
+        bool: 生日是否匹配
+    """
+    if not social_security_number or len(social_security_number) < 14:
+        return False
+    
+    if not birthday_input:
+        return False
+    
+    if not validate_birthday_format(birthday_input):
+        logging.warning(f"Invalid birthday format: {birthday_input}")
+        return False
+    
+    birthday_from_id = extract_birthday_from_id(social_security_number)
+    if not birthday_from_id:
+        return False
+    
+    logging.debug(f"Birthday from ID: {birthday_from_id}, Input: {birthday_input}")
+    
+    return birthday_from_id == birthday_input
+
+
+def validate_birthday_format(birthday_input):
+    """
+    校验生日格式是否为 YYYYMMDD
+    
+    Args:
+        birthday_input: 用户输入的生日字符串
+    
+    Returns:
+        bool: 格式是否正确
+    """
+    if not birthday_input:
+        return False
+    
+    birthday_input = str(birthday_input).strip()
+    
+    if not re.match(r'^\d{8}$', birthday_input):
+        return False
+    return True
+
+
+
+def extract_birthday_from_id(social_security_number):
+    """
+    从中国身份证号中提取生日
+    
+    身份证号第7-14位为出生日期，格式为YYYYMMDD
+    
+    Args:
+        social_security_number: 18位中国身份证号
+    
+    Returns:
+        str: 标准化的生日字符串 "YYYYMMDD"，提取失败返回 None
+    """
+    if not social_security_number or len(social_security_number) < 14:
+        return None
+    
+    try:
+        birth_part = social_security_number[6:14]
+        if not birth_part.isdigit():
+            return None
+        
+        year = birth_part[0:4]
+        month = birth_part[4:6]
+        day = birth_part[6:8]
+        
+        if not (1 <= int(month) <= 12 and 1 <= int(day) <= 31):
+            return None
+        
+        return f"{year}{month}{day}"
+    except (ValueError, IndexError):
+        return None
 
 def generate_markdown(messages):
     """将会话消息转换为Markdown格式"""
