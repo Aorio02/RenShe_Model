@@ -24,7 +24,7 @@ export default function ChatBasicSetting() {
 
   return (
     <div className="space-y-8">
-      <FormField
+      {/* <FormField
         control={form.control}
         name={'icon'}
         render={({ field }) => (
@@ -38,8 +38,8 @@ export default function ChatBasicSetting() {
             </FormItem>
           </div>
         )}
-      />
-      <FormField
+      /> */}
+      {/* <FormField
         control={form.control}
         name="name"
         render={({ field }) => (
@@ -51,8 +51,8 @@ export default function ChatBasicSetting() {
             <FormMessage />
           </FormItem>
         )}
-      />
-      <FormField
+      /> */}
+      {/* <FormField
         control={form.control}
         name="description"
         render={({ field }) => (
@@ -64,8 +64,8 @@ export default function ChatBasicSetting() {
             <FormMessage />
           </FormItem>
         )}
-      />
-      <FormField
+      /> */}
+      {/* <FormField
         control={form.control}
         name={'prompt_config.empty_response'}
         render={({ field }) => (
@@ -79,13 +79,13 @@ export default function ChatBasicSetting() {
             <FormMessage />
           </FormItem>
         )}
-      />
+      /> */}
       <FormField
         control={form.control}
         name={'prompt_config.prologue'}
         render={({ field }) => (
           <FormItem>
-            <FormLabel tooltip={t('setAnOpenerTip')}>
+            <FormLabel>
               {t('setAnOpener')}
             </FormLabel>
             <FormControl>
@@ -111,7 +111,7 @@ export default function ChatBasicSetting() {
         tooltip={t('ttsTip')}
       ></SwitchFormField>
       <TOCEnhanceFormField name="prompt_config.toc_enhance"></TOCEnhanceFormField>
-      <TavilyFormField></TavilyFormField>
+      {/* <TavilyFormField></TavilyFormField> */}
       <KnowledgeBaseFormField></KnowledgeBaseFormField>
       <MetadataFilter></MetadataFilter>
     </div>

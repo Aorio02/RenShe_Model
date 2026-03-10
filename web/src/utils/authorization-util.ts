@@ -60,5 +60,5 @@ export default storage;
 // Will not jump to the login page
 export function redirectToLogin() {
   // const env = import.meta.env;
-  window.location.href = location.origin + `/`;
+  window.location.href = location.origin + `/login`;
 }

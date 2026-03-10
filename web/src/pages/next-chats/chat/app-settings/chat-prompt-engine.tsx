@@ -44,7 +44,7 @@ export function ChatPromptEngine() {
       />
       <SimilaritySliderFormField isTooltipShown></SimilaritySliderFormField>
       <TopNFormField></TopNFormField>
-      <SwitchFormField
+      {/* <SwitchFormField
         name={'prompt_config.refine_multiturn'}
         label={t('multiTurn')}
         tooltip={t('multiTurnTip')}
@@ -57,7 +57,7 @@ export function ChatPromptEngine() {
       ></SwitchFormField>
       <RerankFormFields></RerankFormFields>
       <CrossLanguageFormField></CrossLanguageFormField>
-      <DynamicVariableForm></DynamicVariableForm>
+      <DynamicVariableForm></DynamicVariableForm> */}
     </div>
   );
 }

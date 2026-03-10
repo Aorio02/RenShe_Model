@@ -129,10 +129,10 @@ export default function Chat() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <Button onClick={showEmbedModal}>
+        {/* <Button onClick={showEmbedModal}>
           <Send />
           {t('common.embedIntoSite')}
-        </Button>
+        </Button> */}
       </PageHeader>
       <div className="flex flex-1 min-h-0 pb-9">
         <Sessions
