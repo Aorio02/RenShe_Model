@@ -68,15 +68,11 @@ export enum Routes {
 const routeConfig = [
   {
     path: '/login',
-    Component: lazy(() => import('@/pages/login-next')),
-    layout: false,
-    errorElement: <FallbackComponent />,
+    element: <Navigate to={Routes.Root} replace />,
   },
   {
     path: '/login-next',
-    Component: lazy(() => import('@/pages/login-next')),
-    layout: false,
-    errorElement: <FallbackComponent />,
+    element: <Navigate to={Routes.Root} replace />,
   },
   {
     path: Routes.ChatShare,
@@ -116,14 +112,7 @@ const routeConfig = [
   {
     path: Routes.Root,
     layout: false,
-    Component: lazy(() => import('@/layouts/next')),
-    wrappers: ['@/wrappers/auth'],
-    children: [
-      {
-        path: Routes.Root,
-        Component: lazy(() => import('@/pages/home')),
-      },
-    ],
+    Component: lazy(() => import('@/pages/dashboard')),
     errorElement: <FallbackComponent />,
   },
   {
@@ -346,7 +335,7 @@ const routeConfig = [
     children: [
       {
         path: '/user-setting',
-        element: <Navigate to={`/user-setting${Routes.Model}`} replace />,
+        element: <Navigate to={`/user-setting${Routes.DataSource}`} replace />,
       },
       {
         path: '/user-setting/profile',
