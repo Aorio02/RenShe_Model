@@ -513,32 +513,55 @@ async def log_out():
 @login_required
 async def setting_user():
     """
-    Update user settings.
-    ---
-    tags:
-      - User
-    security:
-      - ApiKeyAuth: []
-    parameters:
-      - in: body
-        name: body
-        description: User settings to update.
-        required: true
-        schema:
-          type: object
-          properties:
-            nickname:
-              type: string
-              description: New nickname.
-            email:
-              type: string
-              description: New email.
-    responses:
-      200:
-        description: Settings updated successfully.
-        schema:
-          type: object
-    """
+Update user settings.
+---
+tags:
+  - User
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: body
+    name: body
+    description: User settings to update.
+    required: true
+    schema:
+      type: object
+      properties:
+        nickname:
+          type: string
+          description: New nickname.
+        email:
+          type: string
+          description: New email.
+        full_name:
+          type: string
+          description: Full name of the user.
+          maxLength: 100
+          nullable: true
+        id_number:
+          type: string
+          description: ID card number.
+          maxLength: 50
+          nullable: true
+        date_of_birth:
+          type: string
+          description: Date of birth ( e.g., "1990-01-01").
+          nullable: true
+        phone:
+          type: string
+          description: Phone number.
+          maxLength: 20
+          nullable: true
+        address:
+          type: string
+          description: Home address.
+          nullable: true
+responses:
+  200:
+    description: Settings updated successfully.
+    schema:
+      type: object
+"""
     update_dict = {}
     request_data = await get_request_json()
     if request_data.get("password"):

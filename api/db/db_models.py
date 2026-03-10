@@ -618,7 +618,7 @@ class User(DataBaseModel, AuthUser):
     date_of_birth = DateTimeField(null=True, help_text="Date of birth")
     phone = CharField(max_length=20, null=True, help_text="Phone number")
     address = TextField(null=True, help_text="Address")
-    profile_completed = BooleanField(default=False, help_text="Has completed profile", index=True)
+   
 
     def __str__(self):
         return self.email
@@ -1299,6 +1299,5 @@ def migrate_db():
     alter_db_add_column(migrator, "user", "date_of_birth", DateTimeField(null=True))
     alter_db_add_column(migrator, "user", "phone", CharField(max_length=20, null=True))
     alter_db_add_column(migrator, "user", "address", TextField(null=True))
-    alter_db_add_column(migrator, "user", "profile_completed", BooleanField(default=False, index=True))
 
     logging.disable(logging.NOTSET)
