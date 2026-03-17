@@ -1,3 +1,4 @@
+import logoImg from '@/assets/logo.png';
 import { RAGFlowAvatar } from '@/components/ragflow-avatar';
 import {
   DropdownMenu,
@@ -101,12 +102,23 @@ export function Header() {
   }, [pathname]);
 
   return (
-    <section className="py-5 px-10 flex justify-between items-center ">
+    // 更换logo
+    // <section className="py-5 px-10 flex justify-between items-center ">
+    <section
+      className="py-4 px-10 flex justify-between items-center"
+      style={{
+        background: 'rgba(255,255,255,0.12)',
+        backdropFilter: 'blur(8px)',
+        borderBottom: '1px solid rgba(255,255,255,0.2)',
+      }}
+    >
       <div className="flex items-center gap-4">
         <img
-          src={'/logo.svg'}
+          // src={'/logo.svg'}
+          src={logoImg}
           alt="logo"
-          className="size-10 mr-[12] cursor-pointer"
+          // className="size-10 mr-[12] cursor-pointer"
+          className="h-10 w-auto mr-[12] cursor-pointer object-contain"
           onClick={handleLogoClick}
         />
       </div>

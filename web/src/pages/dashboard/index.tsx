@@ -91,9 +91,9 @@ const Dashboard = () => {
           </p>
 
           <ul className="space-y-4 text-xl tracking-wider text-white">
-            <li><Link to="/social-security" className="flex items-center gap-3 hover:text-blue-300 transition-colors cursor-pointer w-fit"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>社保服务</Link></li>
-            <li><Link to="/medical-insurance" className="flex items-center gap-3 hover:text-blue-300 transition-colors cursor-pointer w-fit"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>医保服务</Link></li>
-            <li><Link to="/employment" className="flex items-center gap-3 hover:text-blue-300 transition-colors cursor-pointer w-fit"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>就业服务</Link></li>
+            <li><span className="flex items-center gap-3 hover:text-blue-300 transition-colors cursor-pointer w-fit"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>社保服务</span></li>
+            <li><span className="flex items-center gap-3 hover:text-blue-300 transition-colors cursor-pointer w-fit"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>医保服务</span></li>
+            <li><span className="flex items-center gap-3 hover:text-blue-300 transition-colors cursor-pointer w-fit"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>就业服务</span></li>
           </ul>
         </div>
 

@@ -54,6 +54,8 @@ export default {
 
   sequence2txt: `${api_host}/conversation/sequence2txt`,
 
+  funasrSequence2txt: `${api_host}/asr/audio_to_text`,
+
   // knowledge base
 
   check_embedding: `${api_host}/kb/check_embedding`,

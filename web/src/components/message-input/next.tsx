@@ -54,22 +54,30 @@ export function NextMessageInput({
   removeFile,
 }: IProps) {
   const [files, setFiles] = React.useState<File[]>([]);
-  const [audioInputValue, setAudioInputValue] = React.useState<string | null>(
-    null,
-  );
+  const [audioInputValue, setAudioInputValue] = React.useState<string | null>(null);
 
+  // ✅ 核心修改：只填充内容，不自动发送
   useEffect(() => {
-    if (audioInputValue !== null) {
-      onInputChange({
+    if (audioInputValue !== null && audioInputValue !== '') {
+      console.log('[NextMessageInput] 收到语音识别结果:', audioInputValue);
+      
+      // 1. 模拟 ChangeEvent 将识别到的文本填入输入框
+      const syntheticEvent = {
         target: { value: audioInputValue },
-      } as React.ChangeEvent<HTMLTextAreaElement>);
+      } as React.ChangeEvent<HTMLTextAreaElement>;
+      
+      // 调用父组件传来的 onChange 处理函数，更新父组件的状态
+      onInputChange(syntheticEvent);
 
+      // 2. 【重要】移除了 onPressEnter()，现在不会自动发送
+      
+      // 3. 重置状态，准备下一次识别
+      // 使用 setTimeout 确保上面的状态更新先完成，且允许下次识别相同内容时再次触发
       setTimeout(() => {
-        onPressEnter();
         setAudioInputValue(null);
-      }, 0);
+      }, 100);
     }
-  }, [audioInputValue, onInputChange, onPressEnter]);
+  }, [audioInputValue, onInputChange]);
 
   const onFileReject = React.useCallback((file: File, message: string) => {
     toast(message, {
@@ -116,7 +124,6 @@ export function NextMessageInput({
     >
       <FileUploadDropzone
         tabIndex={-1}
-        // Prevents the dropzone from triggering on click
         onClick={(event) => event.preventDefault()}
         className="absolute top-0 left-0 z-0 flex size-full items-center justify-center rounded-none border-none bg-background/50 p-0 opacity-0 backdrop-blur transition-opacity duration-200 ease-out data-[dragging]:z-10 data-[dragging]:opacity-100"
       >
@@ -157,6 +164,8 @@ export function NextMessageInput({
             </FileUploadItem>
           ))}
         </FileUploadList>
+        
+        {/* ✅ 确保 Textarea 的 value 绑定的是 props.value */}
         <Textarea
           value={value}
           onChange={onInputChange}
@@ -165,6 +174,7 @@ export function NextMessageInput({
           disabled={isUploading || disabled || sendLoading}
           onKeyDown={handleKeyDown}
         />
+        
         <div
           className={cn('flex items-center justify-between gap-1.5', {
             'justify-end': !showUploadIcon,
@@ -190,13 +200,12 @@ export function NextMessageInput({
             </Button>
           ) : (
             <div className="flex items-center gap-3">
-              {/* <div className="bg-bg-input rounded-md hover:bg-bg-card p-1"> */}
               <AudioButton
-                onOk={(value) => {
-                  setAudioInputValue(value);
+                onOk={(transcript) => {
+                  console.log('[NextMessageInput] AudioButton 回调触发:', transcript);
+                  setAudioInputValue(transcript);
                 }}
               />
-              {/* </div> */}
               <Button
                 className="size-5 rounded-sm"
                 disabled={
