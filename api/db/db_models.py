@@ -878,6 +878,7 @@ class Dialog(DataBaseModel):
         "empty_response": "抱歉！在知识库中没有找到相关内容。"
     },
     )
+    meta_data_filter = JSONField(null=True, default={})
     similarity_threshold = FloatField(default=0.2)
     vector_similarity_weight = FloatField(default=0.3)
 
