@@ -11,7 +11,8 @@ import { rsaPsw } from '@/utils';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
-
+import logoImg from '@/assets/logo.png';
+import backImg from '@/assets/back.png';
 import Spotlight from '@/components/spotlight';
 import { Button, ButtonLoading } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -153,14 +154,30 @@ const Login = () => {
         Y={'-10%'}
         color={'rgb(128, 255, 248)'}
       />
-      <div className=" h-[inherit] relative overflow-auto">
+      {/* <div className=" h-[inherit] relative overflow-auto"> */}
+      <div className="h-screen w-full relative overflow-hidden bg-gradient-to-br from-[#4A9FE0] via-[#2979C2] to-[#1565C0] text-white">
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 0,
+            backgroundImage: `url(${backImg})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            opacity: 0.1,
+            maskImage:
+              'radial-gradient(ellipse 85% 85% at 50% 50%, black 30%, transparent 100%)',
+            WebkitMaskImage:
+              'radial-gradient(ellipse 85% 85% at 50% 50%, black 30%, transparent 100%)',
+          }}
+        />
         <BgSvg isPaused={isUserInteracting} />
 
         <div className="absolute top-3 flex flex-col items-center mb-12 w-full text-text-primary">
           <div className="flex items-center mb-4 w-full pl-10 pt-10 ">
             <div className="w-12 h-12 p-2 rounded-lg flex items-center justify-center mr-3">
               <img
-                src={'/logo.svg'}
+                src={logoImg}
                 alt="logo"
                 className="size-8 mr-[12] cursor-pointer"
               />

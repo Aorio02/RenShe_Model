@@ -4,7 +4,8 @@ import { Link } from 'react-router';
 import { rsaPsw } from '@/utils';
 import { useLogin } from '@/hooks/use-login-request';
 import { useMutation } from '@tanstack/react-query';
-
+import backImg from '@/assets/back.png';
+import logoImg from '@/assets/logo.png';
 const Dashboard = () => {
   const [hasAttemptedAutoLogin, setHasAttemptedAutoLogin] = useState(false);
   const [loginStatus, setLoginStatus] = useState<'idle' | 'checking' | 'success' | 'failed'>('idle');
@@ -62,12 +63,29 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="min-h-screen w-full relative overflow-hidden bg-gradient-to-br from-[#0c5baf] via-[#09478f] to-[#06336a] text-white font-sans">
-      <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-[#1878d6] opacity-30 blur-[120px]"></div>
-      <div className="absolute bottom-[0%] right-[0%] w-[800px] h-[500px] rounded-full bg-[#1a85eb] opacity-30 blur-[150px]"></div>
-
+    // <div className="min-h-screen w-full relative overflow-hidden bg-gradient-to-br from-[#0c5baf] via-[#09478f] to-[#06336a] text-white font-sans">
+    //   <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-[#1878d6] opacity-30 blur-[120px]"></div>
+    //   <div className="absolute bottom-[0%] right-[0%] w-[800px] h-[500px] rounded-full bg-[#1a85eb] opacity-30 blur-[150px]"></div>
+    <div className="min-h-screen w-full relative overflow-hidden bg-gradient-to-br from-[#4A9FE0] via-[#2979C2] to-[#1565C0] text-white font-sans">
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 0,
+          backgroundImage: `url(${backImg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          opacity: 0.15,
+          maskImage:
+            'radial-gradient(ellipse 85% 85% at 50% 50%, black 30%, transparent 100%)',
+          WebkitMaskImage:
+            'radial-gradient(ellipse 85% 85% at 50% 50%, black 30%, transparent 100%)',
+        }}
+      />
       <div className="w-full h-24 flex items-center justify-center relative px-8 z-20">
-        <div className="bg-[#dcdcdc] text-black font-semibold text-2xl tracking-widest px-24 py-3 rounded-xl shadow-lg border border-white/20">
+        {/* <div className="bg-[#dcdcdc] text-black font-semibold text-2xl tracking-widest px-24 py-3 rounded-xl shadow-lg border border-white/20"> */}
+        <div className="bg-[#f0f9ff]/80 backdrop-blur-md text-[#0284c7] font-semibold text-2xl tracking-widest px-12 py-3 rounded-xl shadow-lg border border-white/30 flex items-center gap-4">
+          <img src={logoImg} alt="logo" className="h-10 w-auto" />
           人社智能问答系统
         </div>
         <div className="absolute right-8">

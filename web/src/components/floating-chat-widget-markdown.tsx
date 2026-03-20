@@ -8,9 +8,9 @@ import {
 import { IReference, IReferenceChunk } from '@/interfaces/database/chat';
 import {
   currentReg,
+  removeThinkBlocks,
   preprocessLaTeX,
   replaceTextByOldReg,
-  replaceThinkToSection,
   showImage,
 } from '@/utils/chat';
 import { getExtension } from '@/utils/document-util';
@@ -20,7 +20,6 @@ import classNames from 'classnames';
 import DOMPurify from 'dompurify';
 import 'katex/dist/katex.min.css';
 import { omit } from 'lodash';
-import { pipe } from 'lodash/fp';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import Markdown from 'react-markdown';
@@ -57,9 +56,9 @@ const FloatingChatWidgetMarkdown = ({
   const isDarkTheme = useIsDarkTheme();
 
   const contentWithCursor = useMemo(() => {
-    let text = content === '' ? t('chat.searching') : content;
+    const text = content === '' ? t('chat.searching') : removeThinkBlocks(content);
     const nextText = replaceTextByOldReg(text);
-    return pipe(replaceThinkToSection, preprocessLaTeX)(nextText);
+    return preprocessLaTeX(nextText);
   }, [content, t]);
 
   useEffect(() => {

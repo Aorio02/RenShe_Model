@@ -19,13 +19,12 @@ import 'katex/dist/katex.min.css'; // `rehype-katex` does not import the CSS for
 import { useFetchDocumentThumbnailsByIds } from '@/hooks/use-document-request';
 import {
   currentReg,
+  removeThinkBlocks,
   preprocessLaTeX,
   replaceTextByOldReg,
-  replaceThinkToSection,
 } from '@/utils/chat';
 import classNames from 'classnames';
 import { omit } from 'lodash';
-import { pipe } from 'lodash/fp';
 import reactStringReplace from 'react-string-replace';
 import { Button } from '../ui/button';
 import {
@@ -52,17 +51,13 @@ const MarkdownContent = ({
   const { setDocumentIds, data: fileThumbnails } =
     useFetchDocumentThumbnailsByIds();
   const contentWithCursor = useMemo(() => {
-    let text = DOMPurify.sanitize(content, {
-      ADD_TAGS: ['think', 'section'],
-      ADD_ATTR: ['class'],
-    });
+    let text = DOMPurify.sanitize(removeThinkBlocks(content));
 
-    // let text = content;
     if (text === '') {
       text = t('chat.searching');
     }
     const nextText = replaceTextByOldReg(text);
-    return pipe(replaceThinkToSection, preprocessLaTeX)(nextText);
+    return preprocessLaTeX(nextText);
   }, [content, t]);
 
   useEffect(() => {
@@ -207,7 +202,7 @@ const MarkdownContent = ({
 
   const renderReference = useCallback(
     (text: string) => {
-      let replacedText = reactStringReplace(text, currentReg, (match, i) => {
+      const replacedText = reactStringReplace(text, currentReg, (match, i) => {
         const chunkIndex = getChunkIndex(match);
 
         return (

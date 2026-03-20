@@ -3,7 +3,7 @@ import { useEffect, useId } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
-
+import logoImg from '@/assets/logo.png';
 import { useMutation } from '@tanstack/react-query';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -130,7 +130,7 @@ function AdminLogin() {
 
         <div className="absolute top-3 left-0 w-full">
           <div className="absolute mt-12 ml-12 flex items-center">
-            <img className="size-8 mr-5" src="/logo.svg" alt="logo" />
+            <img className="size-8 mr-5" src={logoImg} alt="logo" />
             <span className="text-xl font-bold">RAGFlow</span>
           </div>
 

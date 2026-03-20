@@ -217,9 +217,9 @@ const ModelProviders = () => {
     [showApiKeyModal, showLlmAddingModal, ModalMap, detailedLlmList],
   );
   return (
-    <div className="flex w-full border-[0.5px] border-border-button rounded-lg relative ">
+    <div className="flex w-full border-[0.5px] border-white/10 rounded-lg relative ">
       <Spotlight />
-      <section className="flex flex-col gap-4 w-3/5 px-5 border-r-[0.5px] border-border-button overflow-auto scrollbar-auto">
+      <section className="flex flex-col gap-4 w-3/5 px-5 border-r-[0.5px] border-white/10 overflow-auto scrollbar-auto">
         <SystemSetting
           onOk={onSystemSettingSavingOk}
           loading={saveSystemModelSettingLoading}

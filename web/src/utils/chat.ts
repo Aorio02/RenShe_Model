@@ -52,6 +52,13 @@ export const preprocessLaTeX = (content: string) => {
   return inlineProcessedContent;
 };
 
+export function removeThinkBlocks(text: string = '') {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .replace(/<think>[\s\S]*$/g, '')
+    .replace(/<\/think>/g, '');
+}
+
 export function replaceThinkToSection(text: string = '') {
   const pattern = /<think>([\s\S]*?)<\/think>/g;
 

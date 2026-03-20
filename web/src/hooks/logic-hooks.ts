@@ -261,7 +261,7 @@ export const useSendMessageWithSse = (
           .pipeThrough(new EventSourceParserStream())
           .getReader();
 
-        while (true) {
+        for (;;) {
           try {
             const x = await reader?.read();
             if (x) {
@@ -275,15 +275,7 @@ export const useSendMessageWithSse = (
                 const d = val?.data;
                 if (typeof d !== 'boolean') {
                   setAnswer((prev) => {
-                    let newAnswer = (prev.answer || '') + (d.answer || '');
-
-                    if (d.start_to_think === true) {
-                      newAnswer = newAnswer + '<think>';
-                    }
-
-                    if (d.end_to_think === true) {
-                      newAnswer = newAnswer + '</think>';
-                    }
+                    const newAnswer = (prev.answer || '') + (d.answer || '');
 
                     return {
                       ...d,
@@ -293,13 +285,12 @@ export const useSendMessageWithSse = (
                     };
                   });
                 }
-              } catch (e) {
+              } catch {
                 // Swallow parse errors silently
               }
             }
-          } catch (e) {
-            if (e instanceof DOMException && e.name === 'AbortError') {
-              console.log('Request was aborted by user or logic.');
+          } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
               break;
             }
           }
@@ -307,7 +298,7 @@ export const useSendMessageWithSse = (
         setDoneValue(body, true);
         resetAnswer();
         return { data: await res, response };
-      } catch (e) {
+      } catch {
         setDoneValue(body, true);
 
         resetAnswer();
@@ -350,7 +341,7 @@ export const useSpeechWithSse = (url: string = api.tts) => {
         if (res?.code !== 0) {
           message.error(res?.message);
         }
-      } catch (error) {
+      } catch {
         // Swallow errors silently
       }
       return response;

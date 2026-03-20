@@ -14,6 +14,7 @@
 #  limitations under the License.
 #
 import time
+import re
 from uuid import uuid4
 from common.constants import StatusEnum
 from api.db.db_models import Conversation, DB
@@ -65,6 +66,15 @@ class ConversationService(CommonService):
         return res
 
 
+def _remove_think_blocks(text: str) -> str:
+    if not text:
+        return text
+
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    text = re.sub(r"<think>[\s\S]*$", "", text)
+    return text.replace("</think>", "")
+
+
 def structure_answer(conv, ans, message_id, session_id):
     reference = ans["reference"]
     if not isinstance(reference, dict):
@@ -77,6 +87,9 @@ def structure_answer(conv, ans, message_id, session_id):
     reference["chunks"] = chunk_list
     ans["id"] = message_id
     ans["session_id"] = session_id
+    ans["answer"] = _remove_think_blocks(ans.get("answer", ""))
+    ans.pop("start_to_think", None)
+    ans.pop("end_to_think", None)
 
     if not conv:
         return ans
@@ -84,10 +97,6 @@ def structure_answer(conv, ans, message_id, session_id):
     if not conv.message:
         conv.message = []
     content = ans["answer"]
-    if ans.get("start_to_think"):
-        content = "<think>"
-    elif ans.get("end_to_think"):
-        content = "</think>"
 
     if not conv.message or conv.message[-1].get("role", "") != "assistant":
         conv.message.append({"role": "assistant", "content": content, "created_at": time.time(), "id": message_id})

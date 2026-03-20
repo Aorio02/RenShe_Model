@@ -70,7 +70,8 @@ export const ModelProviderCard: FC<IModelCardProps> = ({
   };
 
   return (
-    <div className={`w-full rounded-lg border border-border-button`}>
+    // <div className={`w-full rounded-lg border border-border-button`}>
+    <div className={`w-full rounded-lg border border-white/10 bg-white/5 backdrop-blur-sm`}>
       {/* Header */}
       <div className="flex h-16  items-center justify-between p-4 cursor-pointer transition-colors text-text-secondary">
         <div className="flex items-center space-x-3">

@@ -186,7 +186,7 @@ export const useComposeLlmOptionsByModelTypes = (
 };
 
 export const useFetchLlmFactoryList = (): ResponseGetType<IFactory[]> => {
-  const ALLOWED_FACTORIES = ['OpenAI', 'DeepSeek', 'Ollama','OpenAI-API-Compatible'];
+  const ALLOWED_FACTORIES = ['VLLM', 'DeepSeek', 'Ollama','OpenAI-API-Compatible'];
   const { data, isFetching: loading } = useQuery({
     queryKey: [LLMApiAction.FactoryList],
     initialData: [],

@@ -199,9 +199,7 @@ async def async_chat_solo(dialog, messages, stream=True):
     if stream:
         stream_iter = chat_mdl.async_chat_streamly_delta(prompt_config.get("system", ""), msg, dialog.llm_setting)
         async for kind, value, state in _stream_with_think_delta(stream_iter):
-            if kind == "marker":
-                flags = {"start_to_think": True} if value == "<think>" else {"end_to_think": True}
-                yield {"answer": "", "reference": {}, "audio_binary": None, "prompt": "", "created_at": time.time(), "final": False, **flags}
+            if kind == "marker" or state.in_think:
                 continue
             yield {"answer": value, "reference": {}, "audio_binary": tts(tts_mdl, value), "prompt": "", "created_at": time.time(), "final": False}
     else:
@@ -362,7 +360,6 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
 
     refine_question_ts = timer()
 
-    thought = ""
     kbinfos = {"total": 0, "chunks": [], "doc_aggs": []}
     knowledges = []
 
@@ -395,12 +392,9 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
             while True:
                 msg = await queue.get()
                 if msg.find("<START_DEEP_RESEARCH>") == 0:
-                    yield {"answer": "", "reference": {}, "audio_binary": None, "final": False, "start_to_think": True}
+                    continue
                 elif msg.find("<END_DEEP_RESEARCH>") == 0:
-                    yield {"answer": "", "reference": {}, "audio_binary": None, "final": False, "end_to_think": True}
                     break
-                else:
-                    yield {"answer": msg, "reference": {}, "audio_binary": None, "final": False}
 
             await task
 
@@ -465,12 +459,8 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
     def decorate_answer(answer):
         nonlocal embd_mdl, prompt_config, knowledges, kwargs, kbinfos, prompt, retrieval_ts, questions, langfuse_tracer
 
+        answer = _remove_think_blocks(answer)
         refs = []
-        ans = answer.split("</think>")
-        think = ""
-        if len(ans) == 2:
-            think = ans[0] + "</think>"
-            answer = ans[1]
 
         if knowledges and (prompt_config.get("quote", True) and kwargs.get("quote", True)):
             idx = set([])
@@ -514,7 +504,7 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
         retrieval_time_cost = (retrieval_ts - refine_question_ts) * 1000
         generate_result_time_cost = (finish_chat_ts - retrieval_ts) * 1000
 
-        tk_num = num_tokens_from_string(think + answer)
+        tk_num = num_tokens_from_string(answer)
         prompt += "\n\n### Query:\n%s" % " ".join(questions)
         prompt = (
             f"{prompt}\n\n"
@@ -538,7 +528,7 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
             langfuse_generation.update(output=langfuse_output)
             langfuse_generation.end()
 
-        return {"answer": think + answer, "reference": refs, "prompt": re.sub(r"\n", "  \n", prompt), "created_at": time.time()}
+        return {"answer": answer, "reference": refs, "prompt": re.sub(r"\n", "  \n", prompt), "created_at": time.time()}
 
     if langfuse_tracer:
         langfuse_generation = langfuse_tracer.start_generation(
@@ -551,14 +541,12 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
         last_state = None
         async for kind, value, state in _stream_with_think_delta(stream_iter):
             last_state = state
-            if kind == "marker":
-                flags = {"start_to_think": True} if value == "<think>" else {"end_to_think": True}
-                yield {"answer": "", "reference": {}, "audio_binary": None, "final": False, **flags}
+            if kind == "marker" or state.in_think:
                 continue
             yield {"answer": value, "reference": {}, "audio_binary": tts(tts_mdl, value), "final": False}
-        full_answer = last_state.full_text if last_state else ""
+        full_answer = _remove_think_blocks(last_state.full_text) if last_state else ""
         if full_answer:
-            final = decorate_answer(thought + full_answer)
+            final = decorate_answer(full_answer)
             final["final"] = True
             final["audio_binary"] = None
             final["answer"] = ""
@@ -728,6 +716,15 @@ def clean_tts_text(text: str) -> str:
 
     return text
 
+
+def _remove_think_blocks(text: str) -> str:
+    if not text:
+        return text
+
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    text = re.sub(r"<think>[\s\S]*$", "", text)
+    return text.replace("</think>", "")
+
 def tts(tts_mdl, text):
     if not tts_mdl or not text:
         return None
@@ -890,12 +887,10 @@ async def async_ask(question, kb_ids, tenant_id, chat_llm_name=None, search_conf
     last_state = None
     async for kind, value, state in _stream_with_think_delta(stream_iter):
         last_state = state
-        if kind == "marker":
-            flags = {"start_to_think": True} if value == "<think>" else {"end_to_think": True}
-            yield {"answer": "", "reference": {}, "final": False, **flags}
+        if kind == "marker" or state.in_think:
             continue
         yield {"answer": value, "reference": {}, "final": False}
-    full_answer = last_state.full_text if last_state else ""
+    full_answer = _remove_think_blocks(last_state.full_text) if last_state else ""
     final = decorate_answer(full_answer)
     final["final"] = True
     final["answer"] = ""

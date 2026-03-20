@@ -10,6 +10,7 @@ import { memo, useCallback, useMemo } from 'react';
 
 import { IRegenerateMessage, IRemoveMessageById } from '@/hooks/logic-hooks';
 import { cn } from '@/lib/utils';
+import { removeThinkBlocks } from '@/utils/chat';
 import MarkdownContent from '../markdown-content';
 import { ReferenceDocumentList } from '../next-message-item/reference-document-list';
 import { ReferenceImageList } from '../next-message-item/reference-image-list';
@@ -75,10 +76,10 @@ const MessageItem = ({
 
   // If we have PDF download info, extract the remaining text
   const messageContent = useMemo(() => {
-    if (!pdfDownloadInfo) return item.content;
+    if (!pdfDownloadInfo) return removeThinkBlocks(item.content);
 
     // Remove the JSON part from the content to avoid showing it
-    return removePDFDownloadInfo(item.content, pdfDownloadInfo);
+    return removeThinkBlocks(removePDFDownloadInfo(item.content, pdfDownloadInfo));
   }, [item.content, pdfDownloadInfo]);
 
   const handleRegenerateMessage = useCallback(() => {
@@ -129,7 +130,7 @@ const MessageItem = ({
               index !== 0 && (
                 <AssistantGroupButton
                   messageId={item.id}
-                  content={item.content}
+                  content={messageContent}
                   prompt={item.prompt}
                   showLikeButton={showLikeButton}
                   audioBinary={item.audio_binary}
@@ -138,7 +139,7 @@ const MessageItem = ({
               )
             ) : (
               <UserGroupButton
-                content={item.content}
+                content={messageContent}
                 messageId={item.id}
                 removeMessageById={removeMessageById}
                 regenerateMessage={regenerateMessage && handleRegenerateMessage}

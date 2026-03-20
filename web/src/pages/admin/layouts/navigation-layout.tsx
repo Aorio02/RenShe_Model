@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NavLink, Outlet, useNavigate } from 'react-router';
+import logoImg from '@/assets/logo.png';
+import backImg from '@/assets/back.png';
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 
@@ -77,10 +79,28 @@ const AdminNavigationLayout = () => {
   });
 
   return (
-    <main className="w-screen h-screen flex flex-row px-6 pt-12 pb-6 dark:*:focus-visible:ring-white">
-      <aside className="w-72 mr-6 flex flex-col gap-6">
+    // <main className="w-screen h-screen flex flex-row px-6 pt-12 pb-6 dark:*:focus-visible:ring-white">
+    //   <aside className="w-72 mr-6 flex flex-col gap-6">
+    <main className="w-screen h-screen flex flex-row px-6 pt-12 pb-6 dark:*:focus-visible:ring-white relative overflow-hidden bg-gradient-to-br from-[#4A9FE0] via-[#2979C2] to-[#1565C0] text-white">
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 0,
+          backgroundImage: `url(${backImg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          opacity: 0.1,
+          maskImage:
+            'radial-gradient(ellipse 85% 85% at 50% 50%, black 30%, transparent 100%)',
+          WebkitMaskImage:
+            'radial-gradient(ellipse 85% 85% at 50% 50%, black 30%, transparent 100%)',
+        }}
+      />
+      <aside className="w-72 mr-6 flex flex-col gap-6 relative z-10 bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20">
         <div className="flex items-center mb-6">
-          <img className="size-8 mr-5" src="/logo.svg" alt="logo" />
+          {/* <img className="size-8 mr-5" src="/logo.svg" alt="logo" /> */}
+          <img className="size-8 mr-5" src={logoImg} alt="logo" />
           <span className="text-xl font-bold">{t('admin.title')}</span>
         </div>
 
@@ -132,7 +152,8 @@ const AdminNavigationLayout = () => {
         </div>
       </aside>
 
-      <section className="flex-1 h-full">
+      {/* <section className="flex-1 h-full"> */}
+      <section className="flex-1 h-full relative z-10 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 overflow-auto">
         <Outlet />
       </section>
     </main>

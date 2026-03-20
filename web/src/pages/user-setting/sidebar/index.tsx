@@ -16,7 +16,7 @@ import { Banknote, Box } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useHandleMenuClick } from './hooks';
-
+import logoImg from '@/assets/logo.png';
 const menuItems = (t: TFunction) => [
   { icon: Box, label: t('setting.model'), key: Routes.Model },
   { icon: Banknote, label: 'MCP', key: Routes.Mcp },
@@ -35,8 +35,14 @@ export function SideBar() {
   const { logout } = useLogout();
 
   return (
-    <aside className="w-[303px] bg-bg-base flex flex-col">
-      <div className="px-6 flex gap-2 items-center">
+    <aside className="w-[303px] bg-white/10 backdrop-blur-md flex flex-col border-r border-white/20">
+      <div className="p-6 mb-4">
+        <div className="flex items-center gap-3">
+          <img src={logoImg} alt="logo" className="h-8 w-auto" />
+          <span className="text-lg font-bold text-white tracking-widest">人社服务</span>
+        </div>
+      </div>
+      <div className="px-6 flex gap-2 items-center mb-6">
         <RAGFlowAvatar
           avatar={userInfo?.avatar}
           name={userInfo?.nickname}
@@ -53,8 +59,8 @@ export function SideBar() {
                 <Button
                   variant={hoverKey ? 'secondary' : 'ghost'}
                   className={cn('w-full justify-between gap-2.5 p-3 relative', {
-                    'bg-bg-card text-text-primary': active === item.key,
-                    'bg-bg-base text-text-secondary': active !== item.key,
+                    'bg-white/20 text-white': active === item.key,
+                    'bg-transparent text-white/70 hover:bg-white/10': active !== item.key,
                   })}
                   onClick={handleMenuClick(item.key)}
                 >
