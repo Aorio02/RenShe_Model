@@ -184,9 +184,9 @@ const Login = () => {
             </div>
             <div className="text-xl font-bold self-center">RAGFlow</div>
           </div>
-          <h1 className="text-[36px] font-medium  text-center mb-2">
+          {/* <h1 className="text-[36px] font-medium  text-center mb-2">
             {t('title')}
-          </h1>
+          </h1> */}
           {/* border border-accent-primary rounded-full */}
           {/* <div className="mt-4 px-6 py-1 text-sm font-medium text-cyan-600  hover:bg-cyan-50 transition-colors duration-200 border-glow relative overflow-hidden">
             {t('start')}
