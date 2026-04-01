@@ -1,4 +1,4 @@
-let api_host = `/v1`;
+const api_host = `/v1`;
 const ExternalApi = `/api`;
 
 export { api_host };
@@ -134,6 +134,20 @@ export default {
   listConversation: `${api_host}/conversation/list`,
   removeConversation: `${api_host}/conversation/rm`,
   completeConversation: `${api_host}/conversation/completion`,
+  voiceCompletion: `${api_host}/conversation/voice_completion`,
+  retryVoiceCompletion: `${api_host}/conversation/retry_voice_completion`,
+  voiceFile: ({
+    conversationId,
+    messageId,
+    seq,
+    role,
+  }: {
+    conversationId: string;
+    messageId: string;
+    seq?: number;
+    role?: 'user' | 'assistant';
+  }) =>
+    `${api_host}/conversation/voice_file?conversation_id=${conversationId}&message_id=${messageId}${typeof seq === 'number' ? `&seq=${seq}` : ''}${role ? `&role=${role}` : ''}`,
   deleteMessage: `${api_host}/conversation/delete_msg`,
   thumbup: `${api_host}/conversation/thumbup`,
   tts: `${api_host}/conversation/tts`,

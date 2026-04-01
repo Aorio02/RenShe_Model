@@ -76,6 +76,12 @@ class Base(ABC):
     def normalize_text(self, text):
         return re.sub(r"(\*\*|##\d+\$\$|#)", "", text)
 
+    @staticmethod
+    def normalize_content_type(content_type: str | None, default: str = "audio/mpeg") -> str:
+        if not content_type:
+            return default
+        return content_type.split(";", 1)[0].strip().lower() or default
+
 
 class FishAudioTTS(Base):
     _FACTORY_NAME = "Fish Audio"
@@ -84,6 +90,7 @@ class FishAudioTTS(Base):
         if not base_url:
             base_url = "https://api.fish.audio/v1/tts"
         key = json.loads(key)
+        self.last_mime_type = "audio/mpeg"
         self.headers = {
             "api-key": key.get("fish_audio_ak"),
             "content-type": "application/msgpack",
@@ -125,6 +132,7 @@ class QwenTTS(Base):
         import dashscope
 
         self.model_name = model_name
+        self.last_mime_type = "audio/mpeg"
         dashscope.api_key = key
 
     def tts(self, text):
@@ -177,7 +185,7 @@ class QwenTTS(Base):
 
 
 class OpenAITTS(Base):
-    _FACTORY_NAME = "OpenAI"
+    _FACTORY_NAME = ["OpenAI", "OpenAI-API-Compatible"]
 
     def __init__(self, key, model_name="tts-1", base_url="https://api.openai.com/v1"):
         if not base_url:
@@ -185,19 +193,44 @@ class OpenAITTS(Base):
         self.api_key = key
         self.model_name = model_name
         self.base_url = base_url
+        self.last_mime_type = "audio/mpeg"
         self.headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
-    def tts(self, text, voice="alloy"):
+    def _build_payload(self, text, voice=None, response_format=None):
+        payload = {"model": self.model_name, "input": text}
+        if voice:
+            payload["voice"] = voice
+        if response_format:
+            payload["response_format"] = response_format
+        return payload
+
+    def tts(self, text, voice="vivian"):
         text = self.normalize_text(text)
-        payload = {"model": self.model_name, "voice": voice, "input": text}
+        payloads = [self._build_payload(text, voice, "mp3")]
+        if voice:
+            payloads.append(self._build_payload(text, None, "mp3"))
+        payloads.append(self._build_payload(text, voice))
+        if voice:
+            payloads.append(self._build_payload(text))
 
-        response = requests.post(f"{self.base_url}/audio/speech", headers=self.headers, json=payload, stream=True)
+        last_error = None
+        for payload in payloads:
+            response = requests.post(f"{self.base_url}/audio/speech", headers=self.headers, json=payload, stream=True)
+            try:
+                self.last_mime_type = self.normalize_content_type(
+                    response.headers.get("Content-Type"),
+                    default=self.last_mime_type,
+                )
+                if response.status_code == 200:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            yield chunk
+                    return
+                last_error = f"{response.status_code}, {response.text}"
+            finally:
+                response.close()
 
-        if response.status_code != 200:
-            raise Exception(f"**Error**: {response.status_code}, {response.text}")
-        for chunk in response.iter_content():
-            if chunk:
-                yield chunk
+        raise RuntimeError(f"**ERROR**: {last_error}")
 
 
 class SparkTTS(Base):
@@ -212,6 +245,7 @@ class SparkTTS(Base):
         self.APISecret = key.get("spark_api_secret", "xxxxxxx")
         self.APIKey = key.get("spark_api_key", "xxxxxx")
         self.model_name = model_name
+        self.last_mime_type = "audio/mpeg"
         self.CommonArgs = {"app_id": self.APPID}
         self.audio_queue = queue.Queue()
 
@@ -295,12 +329,17 @@ class XinferenceTTS(Base):
     def __init__(self, key, model_name, **kwargs):
         self.base_url = kwargs.get("base_url", None)
         self.model_name = model_name
+        self.last_mime_type = "audio/mpeg"
         self.headers = {"accept": "application/json", "Content-Type": "application/json"}
 
     def tts(self, text, voice="中文女", stream=True):
         payload = {"model": self.model_name, "input": text, "voice": voice}
 
         response = requests.post(f"{self.base_url}/v1/audio/speech", headers=self.headers, json=payload, stream=stream)
+        self.last_mime_type = self.normalize_content_type(
+            response.headers.get("Content-Type"),
+            default=self.last_mime_type,
+        )
 
         if response.status_code != 200:
             raise Exception(f"**Error**: {response.status_code}, {response.text}")
@@ -316,6 +355,7 @@ class OllamaTTS(Base):
             base_url = "https://api.ollama.ai/v1"
         self.model_name = model_name
         self.base_url = base_url
+        self.last_mime_type = "audio/mpeg"
         self.headers = {"Content-Type": "application/json"}
         if key and key != "x":
             self.headers["Authorization"] = f"Bearer {key}"
@@ -340,12 +380,17 @@ class GPUStackTTS(Base):
         self.base_url = kwargs.get("base_url", None)
         self.api_key = key
         self.model_name = model_name
+        self.last_mime_type = "audio/mpeg"
         self.headers = {"accept": "application/json", "Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
     def tts(self, text, voice="Chinese Female", stream=True):
         payload = {"model": self.model_name, "input": text, "voice": voice}
 
         response = requests.post(f"{self.base_url}/v1/audio/speech", headers=self.headers, json=payload, stream=stream)
+        self.last_mime_type = self.normalize_content_type(
+            response.headers.get("Content-Type"),
+            default=self.last_mime_type,
+        )
 
         if response.status_code != 200:
             raise Exception(f"**Error**: {response.status_code}, {response.text}")
@@ -364,6 +409,7 @@ class SILICONFLOWTTS(Base):
         self.api_key = key
         self.model_name = model_name
         self.base_url = base_url
+        self.last_mime_type = "audio/mpeg"
         self.headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
     def tts(self, text, voice="anna"):

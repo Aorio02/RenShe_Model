@@ -23,11 +23,12 @@ from quart import Response, request
 from api.apps import current_user, login_required
 from api.db.db_models import APIToken
 from api.db.services.conversation_service import ConversationService, structure_answer
-from api.db.services.dialog_service import DialogService, async_ask, async_chat, gen_mindmap
+from api.db.services.dialog_service import DialogService, async_ask, async_chat, clean_tts_text, gen_mindmap
 from api.db.services.llm_service import LLMBundle
 from api.db.services.search_service import SearchService
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.user_service import TenantService, UserTenantService
+from api.db.services.voice_chat_service import VoiceChatService
 from api.utils.api_utils import get_data_error_result, get_json_result, get_request_json, server_error_response, validate_request
 from rag.prompts.template import load_prompt
 from rag.prompts.generator import chunks_format
@@ -313,7 +314,9 @@ async def sequence2txt():
 @login_required
 async def tts():
     req = await get_request_json()
-    text = req["text"]
+    text = clean_tts_text(req["text"])
+    if not text:
+        return get_data_error_result(message="No readable Chinese content found for TTS")
 
     tenants = TenantService.get_info_by(current_user.id)
     if not tenants:
@@ -325,20 +328,172 @@ async def tts():
 
     tts_mdl = LLMBundle(tenants[0]["tenant_id"], LLMType.TTS, tts_id)
 
-    def stream_audio():
-        try:
-            for txt in re.split(r"[，。/《》？；：！\n\r:;]+", text):
-                for chunk in tts_mdl.tts(txt):
-                    yield chunk
-        except Exception as e:
-            yield ("data:" + json.dumps({"code": 500, "message": str(e), "data": {"answer": "**ERROR**: " + str(e)}}, ensure_ascii=False)).encode("utf-8")
+    def audio_iter():
+        for chunk in tts_mdl.tts(text):
+            yield chunk
 
-    resp = Response(stream_audio(), mimetype="audio/mpeg")
+    try:
+        chunk_iterator = audio_iter()
+        first_chunk = next(chunk_iterator, None)
+        mime_type = getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", "audio/mpeg")
+        mime_type = (mime_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
+    except Exception as e:
+        return server_error_response(e)
+
+    def stream_audio():
+        if first_chunk is not None:
+            yield first_chunk
+        for chunk in chunk_iterator:
+            yield chunk
+
+    resp = Response(stream_audio(), mimetype=mime_type)
     resp.headers.add_header("Cache-Control", "no-cache")
     resp.headers.add_header("Connection", "keep-alive")
     resp.headers.add_header("X-Accel-Buffering", "no")
 
     return resp
+
+
+@manager.route("/voice_completion", methods=["POST"])  # noqa: F821
+@login_required
+async def voice_completion():
+    form = await request.form
+    files = await request.files
+    user_id = current_user.id
+
+    conversation_id = form.get("conversation_id", "").strip()
+    client_message_id = form.get("client_message_id", "").strip()
+    duration_raw = form.get("duration_ms", "0")
+    mime_type = form.get("mime_type", "").strip() or "audio/webm"
+    waveform_raw = form.get("waveform", "")
+    uploaded = files.get("file")
+
+    if not conversation_id:
+        return get_data_error_result(message="conversation_id is required")
+    if not client_message_id:
+        return get_data_error_result(message="client_message_id is required")
+    if not uploaded:
+        return get_data_error_result(message="Missing 'file' in multipart form-data")
+
+    try:
+        duration_ms = int(duration_raw)
+    except Exception:
+        duration_ms = 0
+
+    try:
+        waveform = json.loads(waveform_raw) if waveform_raw else []
+        if not isinstance(waveform, list):
+            waveform = []
+    except Exception:
+        waveform = []
+
+    filename = uploaded.filename or "voice.webm"
+    audio_bytes = uploaded.read()
+
+    async def stream():
+        try:
+            async for event in VoiceChatService.stream_voice_completion(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                client_message_id=client_message_id,
+                filename=filename,
+                mime_type=mime_type,
+                duration_ms=duration_ms,
+                waveform=waveform,
+                audio_bytes=audio_bytes,
+            ):
+                yield "data:" + json.dumps(event, ensure_ascii=False) + "\n\n"
+        except Exception as e:
+            logging.exception(e)
+            yield "data:" + json.dumps(
+                {
+                    "code": 500,
+                    "type": "error",
+                    "data": {
+                        "stage": "storage",
+                        "message": str(e),
+                        "client_message_id": client_message_id,
+                        "recoverable": False,
+                    },
+                },
+                ensure_ascii=False,
+            ) + "\n\n"
+            yield "data:" + json.dumps({"code": 0, "type": "done", "data": True}, ensure_ascii=False) + "\n\n"
+
+    resp = Response(stream(), mimetype="text/event-stream")
+    resp.headers.add_header("Cache-Control", "no-cache")
+    resp.headers.add_header("Connection", "keep-alive")
+    resp.headers.add_header("X-Accel-Buffering", "no")
+    resp.headers.add_header("Content-Type", "text/event-stream; charset=utf-8")
+    return resp
+
+
+@manager.route("/retry_voice_completion", methods=["POST"])  # noqa: F821
+@login_required
+@validate_request("conversation_id", "message_id")
+async def retry_voice_completion():
+    req = await get_request_json()
+    user_id = current_user.id
+    conversation_id = req["conversation_id"]
+    message_id = req["message_id"]
+
+    async def stream():
+        try:
+            async for event in VoiceChatService.stream_retry_voice_completion(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+            ):
+                yield "data:" + json.dumps(event, ensure_ascii=False) + "\n\n"
+        except Exception as e:
+            logging.exception(e)
+            yield "data:" + json.dumps(
+                {
+                    "code": 500,
+                    "type": "error",
+                    "data": {
+                        "stage": "asr",
+                        "message": str(e),
+                        "client_message_id": message_id,
+                        "recoverable": False,
+                    },
+                },
+                ensure_ascii=False,
+            ) + "\n\n"
+            yield "data:" + json.dumps({"code": 0, "type": "done", "data": True}, ensure_ascii=False) + "\n\n"
+
+    resp = Response(stream(), mimetype="text/event-stream")
+    resp.headers.add_header("Cache-Control", "no-cache")
+    resp.headers.add_header("Connection", "keep-alive")
+    resp.headers.add_header("X-Accel-Buffering", "no")
+    resp.headers.add_header("Content-Type", "text/event-stream; charset=utf-8")
+    return resp
+
+
+@manager.route("/voice_file", methods=["GET"])  # noqa: F821
+@login_required
+async def voice_file():
+    conversation_id = request.args.get("conversation_id", "")
+    message_id = request.args.get("message_id", "")
+    seq = request.args.get("seq")
+    role = request.args.get("role")
+
+    if not conversation_id or not message_id:
+        return get_data_error_result(message="conversation_id and message_id are required")
+
+    try:
+        blob, mime_type = VoiceChatService.get_voice_blob_for_message(
+            user_id=current_user.id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            seq=int(seq) if seq is not None else None,
+            role=role,
+        )
+        resp = Response(blob, mimetype=mime_type)
+        resp.headers.add_header("Cache-Control", "no-cache")
+        return resp
+    except Exception as e:
+        return server_error_response(e)
 
 
 @manager.route("/delete_msg", methods=["POST"])  # noqa: F821

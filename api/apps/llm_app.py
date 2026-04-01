@@ -267,7 +267,7 @@ async def add_llm():
             try:
                 for resp in mdl.tts("Hello~ RAGFlower!"):
                     pass
-            except RuntimeError as e:
+            except Exception as e:
                 msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
         case LLMType.OCR.value:
             assert factory in OcrModel, f"OCR model from {factory} is not supported yet."

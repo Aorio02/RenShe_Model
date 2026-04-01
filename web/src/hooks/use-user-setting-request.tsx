@@ -23,7 +23,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from 'antd';
 import DOMPurify from 'dompurify';
 import { isEmpty } from 'lodash';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export const enum UserSettingApiAction {
@@ -44,23 +44,51 @@ export const enum UserSettingApiAction {
   FetchLangfuseConfig = 'fetchLangfuseConfig',
 }
 
+const USER_SETTING_STALE_TIME = 5 * 60 * 1000;
+const USER_SETTING_GC_TIME = 30 * 60 * 1000;
+
 export const useFetchUserInfo = (): ResponseGetType<IUserInfo> => {
   const { i18n } = useTranslation();
+  const queryClient = useQueryClient();
+  const queryKey = [UserSettingApiAction.UserInfo] as const;
+  const cachedInitialData = queryClient.getQueryData<IUserInfo>(queryKey);
 
   const { data, isFetching: loading } = useQuery({
-    queryKey: [UserSettingApiAction.UserInfo],
-    initialData: {},
-    gcTime: 0,
+    queryKey,
+    initialData: () => cachedInitialData ?? ({} as IUserInfo),
+    gcTime: USER_SETTING_GC_TIME,
+    staleTime: cachedInitialData ? USER_SETTING_STALE_TIME : 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
     queryFn: async () => {
-      const { data } = await userService.user_info();
-      if (data.code === 0) {
-        i18n.changeLanguage(
-          LanguageTranslationMap[
-            data.data.language as keyof typeof LanguageTranslationMap
-          ],
-        );
+      const cachedData = queryClient.getQueryData<IUserInfo>(queryKey);
+
+      try {
+        const { data } = await userService.user_info();
+        if (data.code === 0) {
+          const userInfo = data?.data ?? ({} as IUserInfo);
+          if (userInfo.language) {
+            i18n.changeLanguage(
+              LanguageTranslationMap[
+                userInfo.language as keyof typeof LanguageTranslationMap
+              ],
+            );
+          }
+          return userInfo;
+        }
+      } catch {
+        if (cachedData) {
+          return cachedData;
+        }
+        throw new Error('Failed to fetch user info');
       }
-      return data?.data ?? {};
+
+      if (cachedData) {
+        return cachedData;
+      }
+
+      throw new Error('Failed to fetch user info');
     },
   });
 
@@ -71,43 +99,86 @@ export const useFetchTenantInfo = (
   showEmptyModelWarn = false,
 ): ResponseGetType<ITenantInfo> => {
   const { t } = useTranslation();
-  const { data, isFetching: loading } = useQuery({
-    queryKey: [UserSettingApiAction.TenantInfo, showEmptyModelWarn],
-    initialData: {},
-    gcTime: 0,
+  const queryClient = useQueryClient();
+  const warnedEmptyModelRef = useRef(false);
+  const queryKey = [UserSettingApiAction.TenantInfo] as const;
+  const cachedInitialData = queryClient.getQueryData<ITenantInfo>(queryKey);
+  const { data, isFetching: loading, isFetched } = useQuery({
+    queryKey,
+    initialData: () => cachedInitialData ?? ({} as ITenantInfo),
+    gcTime: USER_SETTING_GC_TIME,
+    staleTime: cachedInitialData ? USER_SETTING_STALE_TIME : 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
     queryFn: async () => {
-      const { data: res } = await userService.get_tenant_info();
-      if (res.code === 0) {
-        // llm_id is chat_id
-        // asr_id is speech2txt
-        const { data } = res;
-        if (
-          showEmptyModelWarn &&
-          (isEmpty(data.embd_id) || isEmpty(data.llm_id))
-        ) {
-          Modal.warning({
-            title: t('common.warn'),
-            content: (
-              <div
-                dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(t('setting.modelProvidersWarn')),
-                }}
-              ></div>
-            ),
-            onOk() {
-              history.push('/user-setting/model');
-            },
-          });
-        }
-        data.chat_id = data.llm_id;
-        data.speech2text_id = data.asr_id;
+      const cachedData = queryClient.getQueryData<ITenantInfo>(queryKey);
 
-        return data;
+      try {
+        const { data: res } = await userService.get_tenant_info();
+        if (res.code === 0) {
+          // llm_id is chat_id
+          // asr_id is speech2txt
+          const tenantData = res.data ?? ({} as ITenantInfo);
+          tenantData.chat_id = tenantData.llm_id;
+          tenantData.speech2text_id = tenantData.asr_id;
+
+          return tenantData;
+        }
+      } catch {
+        if (cachedData) {
+          return cachedData;
+        }
+        throw new Error('Failed to fetch tenant info');
       }
 
-      return res;
+      if (cachedData) {
+        return cachedData;
+      }
+
+      throw new Error('Failed to fetch tenant info');
     },
   });
+
+  useEffect(() => {
+    if (!isFetched) {
+      return;
+    }
+
+    const hasModelFields =
+      Object.prototype.hasOwnProperty.call(data ?? {}, 'embd_id') ||
+      Object.prototype.hasOwnProperty.call(data ?? {}, 'llm_id');
+
+    if (!hasModelFields) {
+      return;
+    }
+
+    const hasEmptyModel = isEmpty(data?.embd_id) || isEmpty(data?.llm_id);
+
+    if (!hasEmptyModel) {
+      warnedEmptyModelRef.current = false;
+      return;
+    }
+
+    if (!showEmptyModelWarn || warnedEmptyModelRef.current) {
+      return;
+    }
+
+    warnedEmptyModelRef.current = true;
+    Modal.warning({
+      title: t('common.warn'),
+      content: (
+        <div
+          dangerouslySetInnerHTML={{
+            __html: DOMPurify.sanitize(t('setting.modelProvidersWarn')),
+          }}
+        ></div>
+      ),
+      onOk() {
+        history.push('/user-setting/model');
+      },
+    });
+  }, [data, data?.embd_id, data?.llm_id, isFetched, showEmptyModelWarn, t]);
 
   return { data, loading };
 };
@@ -188,7 +259,7 @@ export const useFetchSystemVersion = () => {
         setVersion(data.data);
         setLoading(false);
       }
-    } catch (error) {
+    } catch {
       setLoading(false);
     }
   }, []);

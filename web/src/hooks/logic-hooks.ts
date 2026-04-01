@@ -8,11 +8,13 @@ import {
   IClientConversation,
   IMessage,
   Message,
+  IVoiceMeta,
 } from '@/interfaces/database/chat';
 import { IKnowledgeFile } from '@/interfaces/database/knowledge';
 import api from '@/utils/api';
 import { getAuthorization } from '@/utils/authorization-util';
 import { buildMessageUuid } from '@/utils/chat';
+import { hexStringToUint8Array } from '@/utils/common-util';
 import { message } from 'antd';
 import { FormInstance } from 'antd/lib';
 import axios from 'axios';
@@ -336,6 +338,17 @@ export const useSpeechWithSse = (url: string = api.tts) => {
         },
         body: JSON.stringify(body),
       });
+      const contentType =
+        response.headers
+          .get('Content-Type')
+          ?.split(';', 1)[0]
+          .trim()
+          .toLowerCase() || '';
+
+      if (contentType && !contentType.includes('json')) {
+        return response;
+      }
+
       try {
         const res = await response.clone().json();
         if (res?.code !== 0) {
@@ -427,6 +440,117 @@ export const useHandleMessageInputChange = () => {
   };
 };
 
+const detectEmbeddedAudioMimeType = (
+  units?: Uint8Array,
+  fallback?: string,
+) => {
+  const normalizedFallback = fallback?.split(';', 1)[0].trim().toLowerCase();
+  if (normalizedFallback) {
+    return normalizedFallback;
+  }
+  if (!units?.length) {
+    return 'audio/mpeg';
+  }
+  if (units.length >= 12) {
+    const header = String.fromCharCode(...units.slice(0, 4));
+    const format = String.fromCharCode(...units.slice(8, 12));
+    if (header === 'RIFF' && format === 'WAVE') {
+      return 'audio/wav';
+    }
+  }
+  if (units.length >= 4) {
+    const header = String.fromCharCode(...units.slice(0, 4));
+    if (header === 'OggS') {
+      return 'audio/ogg';
+    }
+    if (header === 'fLaC') {
+      return 'audio/flac';
+    }
+  }
+  if (
+    units.length >= 4 &&
+    units[0] === 0x1a &&
+    units[1] === 0x45 &&
+    units[2] === 0xdf &&
+    units[3] === 0xa3
+  ) {
+    return 'audio/webm';
+  }
+  if (
+    units.length >= 8 &&
+    String.fromCharCode(...units.slice(4, 8)) === 'ftyp'
+  ) {
+    return 'audio/mp4';
+  }
+  if (
+    (units.length >= 3 &&
+      String.fromCharCode(...units.slice(0, 3)) === 'ID3') ||
+    (units.length >= 2 && units[0] === 0xff && (units[1] & 0xe0) === 0xe0)
+  ) {
+    return 'audio/mpeg';
+  }
+  return 'audio/mpeg';
+};
+
+const mergeStreamingVoice = (
+  previousVoice: IVoiceMeta | undefined,
+  answer: IAnswer,
+): IVoiceMeta | undefined => {
+  if (answer.voice) {
+    if (
+      previousVoice?.kind === 'segments' &&
+      (previousVoice.segments?.length ?? 0) > 0
+    ) {
+      return {
+        ...previousVoice,
+        status: answer.final ? 'ready' : previousVoice.status,
+        file_id: answer.voice.file_id ?? previousVoice.file_id,
+        mime_type: answer.voice.mime_type ?? previousVoice.mime_type,
+        duration_ms: answer.voice.duration_ms ?? previousVoice.duration_ms,
+      };
+    }
+    return answer.voice;
+  }
+
+  if (!answer.audio_binary) {
+    if (previousVoice?.kind === 'segments' && answer.final) {
+      return {
+        ...previousVoice,
+        status: 'ready',
+      };
+    }
+    return previousVoice;
+  }
+
+  const units = hexStringToUint8Array(answer.audio_binary);
+  if (!units?.length) {
+    return previousVoice;
+  }
+
+  const mimeType = detectEmbeddedAudioMimeType(units, answer.audio_mime_type);
+  const prevSegments =
+    previousVoice?.kind === 'segments' ? previousVoice.segments ?? [] : [];
+  const nextSeq =
+    prevSegments.reduce((max, segment) => Math.max(max, segment.seq), 0) + 1;
+  const objectUrl = URL.createObjectURL(new Blob([units], { type: mimeType }));
+
+  return {
+    kind: 'segments',
+    status: answer.final ? 'ready' : 'streaming',
+    mime_type: mimeType,
+    segments: [
+      ...prevSegments,
+      {
+        seq: nextSeq,
+        file_id: '',
+        mime_type: mimeType,
+        duration_ms: 0,
+        object_url: objectUrl,
+      },
+    ],
+  };
+};
+
 export const useSelectDerivedMessages = () => {
   const [derivedMessages, setDerivedMessages] = useState<IMessage[]>([]);
 
@@ -477,9 +601,11 @@ export const useSelectDerivedMessages = () => {
   // Add the streaming message to the last item in the message list
   const addNewestAnswer = useCallback((answer: IAnswer) => {
     setDerivedMessages((pre) => {
+      const previousMessage = pre?.at(-1);
       return [
         ...(pre?.slice(0, -1) ?? []),
         {
+          ...(previousMessage ?? {}),
           role: MessageType.Assistant,
           content: answer.answer,
           reference: answer.reference,
@@ -490,6 +616,7 @@ export const useSelectDerivedMessages = () => {
           prompt: answer.prompt,
           audio_binary: answer.audio_binary,
           ...omit(answer, 'reference'),
+          voice: mergeStreamingVoice(previousMessage?.voice, answer),
         },
       ];
     });
@@ -503,7 +630,12 @@ export const useSelectDerivedMessages = () => {
       if (idx !== -1) {
         return pre.map((x) => {
           if (x.id === answer.id) {
-            return { ...x, ...answer, content: answer.answer };
+            return {
+              ...x,
+              ...answer,
+              content: answer.answer,
+              voice: mergeStreamingVoice(x.voice, answer),
+            };
           }
           return x;
         });
@@ -522,6 +654,7 @@ export const useSelectDerivedMessages = () => {
           prompt: answer.prompt,
           audio_binary: answer.audio_binary,
           ...omit(answer, 'reference'),
+          voice: mergeStreamingVoice(undefined, answer),
         },
       ];
     });

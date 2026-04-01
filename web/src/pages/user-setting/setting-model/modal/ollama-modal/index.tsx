@@ -50,45 +50,55 @@ const OllamaModal = ({
   const { t: tc } = useCommonTranslation();
   const { buildModelTypeOptions } = useBuildModelTypeOptions();
 
-  const optionsMap: Partial<
-    Record<LLMFactory, { label: string; value: string }[]>
-  > & {
-    Default: { label: string; value: string }[];
-  } = {
-    [LLMFactory.HuggingFace]: buildModelTypeOptions([
-      'embedding',
-      'chat',
-      'rerank',
-    ]),
-    [LLMFactory.LMStudio]: buildModelTypeOptions([
-      'chat',
-      'embedding',
-      'image2text',
-    ]),
-    [LLMFactory.Xinference]: buildModelTypeOptions([
-      'chat',
-      'embedding',
-      'rerank',
-      'image2text',
-      'speech2text',
-      'tts',
-    ]),
-    [LLMFactory.ModelScope]: buildModelTypeOptions(['chat']),
-    [LLMFactory.GPUStack]: buildModelTypeOptions([
-      'chat',
-      'embedding',
-      'rerank',
-      'speech2text',
-      'tts',
-    ]),
-    [LLMFactory.OpenRouter]: buildModelTypeOptions(['chat', 'image2text']),
-    Default: buildModelTypeOptions([
-      'chat',
-      'embedding',
-      'rerank',
-      'image2text',
-    ]),
-  };
+  const optionsMap = useMemo<
+    Partial<Record<LLMFactory, { label: string; value: string }[]>> & {
+      Default: { label: string; value: string }[];
+    }
+  >(
+    () => ({
+      [LLMFactory.HuggingFace]: buildModelTypeOptions([
+        'embedding',
+        'chat',
+        'rerank',
+      ]),
+      [LLMFactory.LMStudio]: buildModelTypeOptions([
+        'chat',
+        'embedding',
+        'image2text',
+      ]),
+      [LLMFactory.Xinference]: buildModelTypeOptions([
+        'chat',
+        'embedding',
+        'rerank',
+        'image2text',
+        'speech2text',
+        'tts',
+      ]),
+      [LLMFactory.ModelScope]: buildModelTypeOptions(['chat']),
+      [LLMFactory.GPUStack]: buildModelTypeOptions([
+        'chat',
+        'embedding',
+        'rerank',
+        'speech2text',
+        'tts',
+      ]),
+      [LLMFactory.OpenAiAPICompatible]: buildModelTypeOptions([
+        'chat',
+        'embedding',
+        'rerank',
+        'image2text',
+        'tts',
+      ]),
+      [LLMFactory.OpenRouter]: buildModelTypeOptions(['chat', 'image2text']),
+      Default: buildModelTypeOptions([
+        'chat',
+        'embedding',
+        'rerank',
+        'image2text',
+      ]),
+    }),
+    [buildModelTypeOptions],
+  );
 
   const url =
     llmFactoryToUrlMap[llmFactory as LLMFactory] ||
@@ -185,7 +195,7 @@ const OllamaModal = ({
     });
 
     return baseFields;
-  }, [llmFactory, t]);
+  }, [llmFactory, optionsMap, t]);
 
   const defaultValues: FieldValues = useMemo(() => {
     if (editMode && initialValues) {
@@ -206,7 +216,7 @@ const OllamaModal = ({
           : 'embedding',
       vision: false,
     };
-  }, [editMode, initialValues, llmFactory]);
+  }, [editMode, initialValues, llmFactory, optionsMap]);
 
   const handleOk = async (values?: FieldValues) => {
     if (!values) return;

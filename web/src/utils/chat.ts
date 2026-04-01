@@ -26,6 +26,37 @@ export const buildMessageListWithUuid = (messages?: Message[]) => {
   );
 };
 
+export const sanitizeMessageForRequest = (message: Message | IMessage) => {
+  const nextMessage: Record<string, any> = {
+    ...message,
+  };
+
+  if (nextMessage.voice) {
+    nextMessage.voice = {
+      ...nextMessage.voice,
+    };
+    delete nextMessage.voice.local_url;
+
+    if (Array.isArray(nextMessage.voice.segments)) {
+      nextMessage.voice.segments = nextMessage.voice.segments.map(
+        (segment: Record<string, any>) => {
+          const nextSegment = { ...segment };
+          delete nextSegment.object_url;
+          return nextSegment;
+        },
+      );
+    }
+  }
+
+  return nextMessage;
+};
+
+export const sanitizeMessagesForRequest = (
+  messages?: Array<Message | IMessage>,
+) => {
+  return (messages ?? []).map((message) => sanitizeMessageForRequest(message));
+};
+
 export const generateConversationId = () => {
   return uuid().replace(/-/g, '');
 };

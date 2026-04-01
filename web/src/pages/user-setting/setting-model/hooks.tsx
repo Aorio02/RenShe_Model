@@ -16,6 +16,7 @@ import { IAddLlmRequestBody } from '@/interfaces/request/llm';
 import { getRealModelName } from '@/utils/llm-util';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
+import message from '@/components/ui/message';
 import { ApiKeyPostBody } from '../interface';
 import { MinerUFormValues } from './modal/mineru-modal';
 
@@ -84,6 +85,11 @@ export const useSubmitSystemModelSetting = () => {
     async (
       payload: Omit<ISystemModelSettingSavingParams, 'tenant_id' | 'name'>,
     ) => {
+      if (!systemSetting.tenant_id) {
+        message.error('租户信息尚未加载完成，请稍后重试');
+        return;
+      }
+
       const ret = await saveSystemModelSetting({
         tenant_id: systemSetting.tenant_id,
         name: systemSetting.name,

@@ -10,7 +10,7 @@ import {
 import { useFetchUserInfo } from '@/hooks/use-user-setting-request';
 import { IClientConversation } from '@/interfaces/database/chat';
 import { buildMessageUuidWithRole } from '@/utils/chat';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   useGetSendButtonDisabled,
   useSendButtonDisabled,
@@ -39,8 +39,10 @@ export function SingleChatBox({
     isUploading,
     handleInputChange,
     handlePressEnter,
+    handleVoiceSubmit,
     regenerateMessage,
     removeMessageById,
+    retryVoiceMessage,
     handleUploadFile,
     removeFile,
     setDerivedMessages,
@@ -54,17 +56,30 @@ export function SingleChatBox({
   const sendDisabled = useSendButtonDisabled(value);
   const { visible, hideModal, documentId, selectedChunk, clickDocumentButton } =
     useClickDrawer();
+  const hydratedConversationIdRef = useRef('');
 
   useEffect(() => {
+    const serverConversationId = conversation?.id ?? '';
     const messages = conversation?.message;
-    if (Array.isArray(messages)) {
-      setDerivedMessages(messages);
+    if (serverConversationId && Array.isArray(messages) && messages.length > 0) {
+      setDerivedMessages((previous) => {
+        const switchedConversation =
+          hydratedConversationIdRef.current !== serverConversationId;
+        hydratedConversationIdRef.current = serverConversationId;
+
+        if (switchedConversation || previous.length === 0) {
+          return messages;
+        }
+
+        return previous;
+      });
     }
-  }, [conversation?.message, setDerivedMessages]);
+  }, [conversation?.id, conversation?.message, setDerivedMessages]);
 
   useEffect(() => {
     // Clear the message list after deleting the conversation.
     if (conversationId === '') {
+      hydratedConversationIdRef.current = '';
       setDerivedMessages([]);
     }
   }, [conversationId, setDerivedMessages]);
@@ -83,6 +98,7 @@ export function SingleChatBox({
                 }
                 key={buildMessageUuidWithRole(message)}
                 item={message}
+                conversationId={conversationId}
                 nickname={userInfo.nickname}
                 avatar={userInfo.avatar}
                 avatarDialog={currentDialog.icon}
@@ -97,6 +113,7 @@ export function SingleChatBox({
                 index={i}
                 removeMessageById={removeMessageById}
                 regenerateMessage={regenerateMessage}
+                retryVoiceMessage={retryVoiceMessage}
                 sendLoading={sendLoading}
               ></MessageItem>
             );
@@ -111,6 +128,7 @@ export function SingleChatBox({
         value={value}
         onInputChange={handleInputChange}
         onPressEnter={handlePressEnter}
+        onVoiceSubmit={handleVoiceSubmit}
         conversationId={conversationId}
         createConversationBeforeUploadDocument={
           createConversationBeforeUploadDocument

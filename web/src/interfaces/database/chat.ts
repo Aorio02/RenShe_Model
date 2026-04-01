@@ -15,6 +15,29 @@ export interface PromptConfig {
   cross_languages?: Array<string>;
 }
 
+export interface IVoiceSegment {
+  seq: number;
+  file_id: string;
+  mime_type: string;
+  duration_ms: number;
+  text?: string;
+  object_url?: string;
+}
+
+export interface IVoiceMeta {
+  kind: 'single' | 'segments';
+  status: 'transcribing' | 'streaming' | 'ready' | 'partial' | 'failed';
+  file_id?: string;
+  mime_type?: string;
+  duration_ms?: number;
+  size?: number;
+  waveform?: number[];
+  error?: string;
+  local_url?: string;
+  segments?: IVoiceSegment[];
+  total_duration_ms?: number;
+}
+
 export interface Parameter {
   key: string;
   optional: boolean;
@@ -95,6 +118,8 @@ export interface Message {
   prompt?: string;
   id?: string;
   audio_binary?: string;
+  input_mode?: 'text' | 'voice';
+  voice?: IVoiceMeta;
   data?: any;
   files?: (File | UploadResponseDataType)[];
   chatBoxId?: string;
@@ -134,6 +159,9 @@ export interface IAnswer {
   prompt?: string;
   id?: string;
   audio_binary?: string;
+  audio_mime_type?: string;
+  final?: boolean;
+  voice?: IVoiceMeta;
   data?: any;
   chatBoxId?: string;
 }

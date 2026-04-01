@@ -34,6 +34,8 @@ ENABLE_TASKEXECUTOR=1  # Default to enable task executor
 ENABLE_DATASYNC=1
 ENABLE_MCP_SERVER=0
 ENABLE_ADMIN_SERVER=0 # Default close admin server
+ENABLE_WEB_DEV="${ENABLE_WEB_DEV:-0}"
+WEB_DEV_PORT="${WEB_DEV_PORT:-9222}"
 INIT_SUPERUSER_ARGS="" # Default to not initialize superuser
 CONSUMER_NO_BEG=0
 CONSUMER_NO_END=0
@@ -212,6 +214,16 @@ function ensure_docling() {
       || uv pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple --no-cache-dir "docling${DOCLING_PIN}"
 }
 
+function start_web_dev_server() {
+    echo "Starting web dev server on 0.0.0.0:${WEB_DEV_PORT}..."
+    while true; do
+        cd /ragflow/web
+        npm run dev -- --host 0.0.0.0 --port "${WEB_DEV_PORT}" &
+        wait
+        sleep 1
+    done &
+}
+
 # -----------------------------------------------------------------------------
 # Start components based on flags
 # -----------------------------------------------------------------------------
@@ -249,6 +261,10 @@ fi
 
 if [[ "${ENABLE_MCP_SERVER}" -eq 1 ]]; then
     start_mcp_server
+fi
+
+if [[ "${ENABLE_WEB_DEV}" == "1" || "${ENABLE_WEB_DEV}" == "true" ]]; then
+    start_web_dev_server
 fi
 
 

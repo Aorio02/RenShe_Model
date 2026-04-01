@@ -21,6 +21,7 @@ from api.db.db_models import Conversation, DB
 from api.db.services.api_service import API4ConversationService
 from api.db.services.common_service import CommonService
 from api.db.services.dialog_service import DialogService, async_chat
+from api.db.services.voice_storage_service import VoiceStorageService
 from common.misc_utils import get_uuid
 import json
 
@@ -75,6 +76,40 @@ def _remove_think_blocks(text: str) -> str:
     return text.replace("</think>", "")
 
 
+def _build_persisted_voice(conv, ans, message_id):
+    audio_binary = ans.get("audio_binary")
+    if not audio_binary or not conv or not getattr(conv, "id", None):
+        return None
+
+    owner_id = getattr(conv, "user_id", None)
+    if not owner_id:
+        return None
+
+    try:
+        audio = bytes.fromhex(audio_binary)
+    except Exception:
+        return None
+
+    if not audio:
+        return None
+
+    mime_type = ans.get("audio_mime_type") or "audio/mpeg"
+    file_id = VoiceStorageService.build_assistant_segment_key(
+        conv.id,
+        message_id,
+        1,
+        mime_type,
+    )
+    VoiceStorageService.save_blob(owner_id, file_id, audio)
+    return {
+        "kind": "single",
+        "status": "ready",
+        "file_id": file_id,
+        "mime_type": mime_type,
+        "duration_ms": 0,
+    }
+
+
 def structure_answer(conv, ans, message_id, session_id):
     reference = ans["reference"]
     if not isinstance(reference, dict):
@@ -115,6 +150,12 @@ def structure_answer(conv, ans, message_id, session_id):
         should_update_reference = is_final or bool(reference.get("chunks")) or bool(reference.get("doc_aggs"))
         if should_update_reference:
             conv.reference[-1] = reference
+
+    persisted_voice = _build_persisted_voice(conv, ans, message_id) if is_final else None
+    if persisted_voice and conv.message:
+        conv.message[-1]["voice"] = persisted_voice
+        ans["voice"] = persisted_voice
+
     return ans
 
 

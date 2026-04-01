@@ -1,25 +1,57 @@
 import { useTranslate } from '@/hooks/common-hooks';
 import { CheckOutlined, CopyOutlined } from '@ant-design/icons';
 import { Tooltip } from 'antd';
-import { useState } from 'react';
-import { CopyToClipboard as Clipboard, Props } from 'react-copy-to-clipboard';
+import { useCallback, useState } from 'react';
 
-const CopyToClipboard = ({ text }: Props) => {
+interface CopyToClipboardProps {
+  text: string;
+}
+
+const fallbackCopy = (text: string) => {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+};
+
+const CopyToClipboard = ({ text }: CopyToClipboardProps) => {
   const [copied, setCopied] = useState(false);
   const { t } = useTranslate('common');
 
-  const handleCopy = () => {
-    setCopied(true);
-    setTimeout(() => {
-      setCopied(false);
-    }, 2000);
-  };
+  const handleCopy = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        fallbackCopy(text);
+      }
+      setCopied(true);
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    } catch {
+      fallbackCopy(text);
+      setCopied(true);
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    }
+  }, [text]);
 
   return (
     <Tooltip title={copied ? t('copied') : t('copy')}>
-      <Clipboard text={text} onCopy={handleCopy}>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        className="inline-flex items-center justify-center border-0 bg-transparent p-0 text-inherit"
+      >
         {copied ? <CheckOutlined /> : <CopyOutlined />}
-      </Clipboard>
+      </button>
     </Tooltip>
   );
 };

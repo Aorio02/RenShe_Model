@@ -18,9 +18,8 @@ import { cn } from '@/lib/utils';
 import { t } from 'i18next';
 import { CircleStop, Paperclip, Send, Upload, X } from 'lucide-react';
 import * as React from 'react';
-import { useEffect } from 'react';
 import { toast } from 'sonner';
-import { AudioButton } from '../ui/audio-button';
+import { AudioButton, RecordedVoicePayload } from '../ui/audio-button';
 
 interface IProps {
   disabled: boolean;
@@ -33,6 +32,7 @@ interface IProps {
   showUploadIcon?: boolean;
   isUploading?: boolean;
   onPressEnter(...prams: any[]): void;
+  onVoiceSubmit?(payload: RecordedVoicePayload): void;
   onInputChange: React.ChangeEventHandler<HTMLTextAreaElement>;
   createConversationBeforeUploadDocument?(message: string): Promise<any>;
   stopOutputMessage?(): void;
@@ -49,35 +49,12 @@ export function NextMessageInput({
   showUploadIcon = true,
   onUpload,
   onInputChange,
+  onVoiceSubmit,
   stopOutputMessage,
   onPressEnter,
   removeFile,
 }: IProps) {
   const [files, setFiles] = React.useState<File[]>([]);
-  const [audioInputValue, setAudioInputValue] = React.useState<string | null>(null);
-
-  // ✅ 核心修改：只填充内容，不自动发送
-  useEffect(() => {
-    if (audioInputValue !== null && audioInputValue !== '') {
-      console.log('[NextMessageInput] 收到语音识别结果:', audioInputValue);
-      
-      // 1. 模拟 ChangeEvent 将识别到的文本填入输入框
-      const syntheticEvent = {
-        target: { value: audioInputValue },
-      } as React.ChangeEvent<HTMLTextAreaElement>;
-      
-      // 调用父组件传来的 onChange 处理函数，更新父组件的状态
-      onInputChange(syntheticEvent);
-
-      // 2. 【重要】移除了 onPressEnter()，现在不会自动发送
-      
-      // 3. 重置状态，准备下一次识别
-      // 使用 setTimeout 确保上面的状态更新先完成，且允许下次识别相同内容时再次触发
-      setTimeout(() => {
-        setAudioInputValue(null);
-      }, 100);
-    }
-  }, [audioInputValue, onInputChange]);
 
   const onFileReject = React.useCallback((file: File, message: string) => {
     toast(message, {
@@ -200,12 +177,7 @@ export function NextMessageInput({
             </Button>
           ) : (
             <div className="flex items-center gap-3">
-              <AudioButton
-                onOk={(transcript) => {
-                  console.log('[NextMessageInput] AudioButton 回调触发:', transcript);
-                  setAudioInputValue(transcript);
-                }}
-              />
+              {onVoiceSubmit && <AudioButton onSubmit={onVoiceSubmit} />}
               <Button
                 className="size-5 rounded-sm"
                 disabled={

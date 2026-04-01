@@ -46,6 +46,12 @@ CONTINUOUS_FIELD_TYPE = {IntegerField, FloatField, DateTimeField}
 AUTO_DATE_TIMESTAMP_FIELD_PREFIX = {"create", "start", "end", "update", "read_access", "write_access"}
 
 
+def _execute_sql_compat(execute_sql, sql, params=None, commit=True):
+    if "commit" in inspect.signature(execute_sql).parameters:
+        return execute_sql(sql, params, commit=commit)
+    return execute_sql(sql, params)
+
+
 class TextFieldType(Enum):
     MYSQL = "LONGTEXT"
     POSTGRES = "TEXT"
@@ -246,9 +252,10 @@ class RetryingPooledMySQLDatabase(PooledMySQLDatabase):
         super().__init__(*args, **kwargs)
 
     def execute_sql(self, sql, params=None, commit=True):
+        execute_sql = super().execute_sql
         for attempt in range(self.max_retries + 1):
             try:
-                return super().execute_sql(sql, params, commit)
+                return _execute_sql_compat(execute_sql, sql, params, commit)
             except (OperationalError, InterfaceError) as e:
                 error_codes = [2013, 2006]
                 error_messages = ['', 'Lost connection']
@@ -315,9 +322,10 @@ class RetryingPooledPostgresqlDatabase(PooledPostgresqlDatabase):
         super().__init__(*args, **kwargs)
 
     def execute_sql(self, sql, params=None, commit=True):
+        execute_sql = super().execute_sql
         for attempt in range(self.max_retries + 1):
             try:
-                return super().execute_sql(sql, params, commit)
+                return _execute_sql_compat(execute_sql, sql, params, commit)
             except (OperationalError, InterfaceError) as e:
                 # PostgreSQL specific error codes
                 # 57P01: admin_shutdown

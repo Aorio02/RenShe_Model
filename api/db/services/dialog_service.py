@@ -180,7 +180,7 @@ class DialogService(CommonService):
         return res
 
 
-async def async_chat_solo(dialog, messages, stream=True):
+async def async_chat_solo(dialog, messages, stream=True, enable_tts=True):
     attachments = ""
     if "files" in messages[-1]:
         attachments = "\n\n".join(FileService.get_files(messages[-1]["files"]))
@@ -191,25 +191,90 @@ async def async_chat_solo(dialog, messages, stream=True):
 
     prompt_config = dialog.prompt_config
     tts_mdl = None
-    if prompt_config.get("tts"):
+    if enable_tts and prompt_config.get("tts"):
         tts_mdl = LLMBundle(dialog.tenant_id, LLMType.TTS)
     msg = [{"role": m["role"], "content": re.sub(r"##\d+\$\$", "", m["content"])} for m in messages if m["role"] != "system"]
     if attachments and msg:
         msg[-1]["content"] += attachments
     if stream:
         stream_iter = chat_mdl.async_chat_streamly_delta(prompt_config.get("system", ""), msg, dialog.llm_setting)
+        last_state = None
+        tts_buffer = ""
+        last_flush_at = time.monotonic()
         async for kind, value, state in _stream_with_think_delta(stream_iter):
+            last_state = state
             if kind == "marker" or state.in_think:
                 continue
-            yield {"answer": value, "reference": {}, "audio_binary": tts(tts_mdl, value), "prompt": "", "created_at": time.time(), "final": False}
+            yield {
+                "answer": value,
+                "reference": {},
+                "audio_binary": None,
+                "audio_mime_type": None,
+                "prompt": "",
+                "created_at": time.time(),
+                "final": False,
+            }
+            if not tts_mdl:
+                continue
+            tts_buffer += value
+            flush_texts, tts_buffer = _split_tts_buffer(tts_buffer, last_flush_at, force=False)
+            for flush_text in flush_texts:
+                audio_binary = tts(tts_mdl, flush_text)
+                if not audio_binary:
+                    continue
+                yield {
+                    "answer": "",
+                    "reference": {},
+                    "audio_binary": audio_binary,
+                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
+                    "prompt": "",
+                    "created_at": time.time(),
+                    "final": False,
+                }
+                last_flush_at = time.monotonic()
+        if tts_mdl:
+            flush_texts, _ = _split_tts_buffer(tts_buffer, last_flush_at, force=True)
+            for flush_text in flush_texts:
+                audio_binary = tts(tts_mdl, flush_text)
+                if not audio_binary:
+                    continue
+                yield {
+                    "answer": "",
+                    "reference": {},
+                    "audio_binary": audio_binary,
+                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
+                    "prompt": "",
+                    "created_at": time.time(),
+                    "final": False,
+                }
+                last_flush_at = time.monotonic()
+        full_answer = _remove_think_blocks(last_state.full_text) if last_state else ""
+        audio_binary = tts(tts_mdl, full_answer)
+        yield {
+            "answer": "",
+            "reference": {},
+            "audio_binary": audio_binary,
+            "audio_mime_type": _normalize_tts_mime_type(tts_mdl) if audio_binary else None,
+            "prompt": "",
+            "created_at": time.time(),
+            "final": True,
+        }
     else:
         answer = await chat_mdl.async_chat(prompt_config.get("system", ""), msg, dialog.llm_setting)
         user_content = msg[-1].get("content", "[content not available]")
         logging.debug("User: {}|Assistant: {}".format(user_content, answer))
-        yield {"answer": answer, "reference": {}, "audio_binary": tts(tts_mdl, answer), "prompt": "", "created_at": time.time()}
+        audio_binary = tts(tts_mdl, answer)
+        yield {
+            "answer": answer,
+            "reference": {},
+            "audio_binary": audio_binary,
+            "audio_mime_type": _normalize_tts_mime_type(tts_mdl) if audio_binary else None,
+            "prompt": "",
+            "created_at": time.time(),
+        }
 
 
-def get_models(dialog):
+def get_models(dialog, enable_tts=True):
     embd_mdl, chat_mdl, rerank_mdl, tts_mdl = None, None, None, None
     kbs = KnowledgebaseService.get_by_ids(dialog.kb_ids)
     embedding_list = list(set([kb.embd_id for kb in kbs]))
@@ -229,7 +294,7 @@ def get_models(dialog):
     if dialog.rerank_id:
         rerank_mdl = LLMBundle(dialog.tenant_id, LLMType.RERANK, dialog.rerank_id)
 
-    if dialog.prompt_config.get("tts"):
+    if enable_tts and dialog.prompt_config.get("tts"):
         tts_mdl = LLMBundle(dialog.tenant_id, LLMType.TTS)
     return kbs, embd_mdl, rerank_mdl, chat_mdl, tts_mdl
 
@@ -240,6 +305,11 @@ BAD_CITATION_PATTERNS = [
     re.compile(r"【\s*ID\s*[: ]*\s*(\d+)\s*】"),  # 【ID: 12】
     re.compile(r"ref\s*(\d+)", flags=re.IGNORECASE),  # ref12、REF 12
 ]
+
+TTS_STREAM_MIN_CHARS = 12
+TTS_STREAM_MAX_CHARS = 40
+TTS_STREAM_FLUSH_SECONDS = 0.6
+TTS_STREAM_PUNCTUATION = "。！？；!?;\n"
 
 
 def repair_bad_citation_formats(answer: str, kbinfos: dict, idx: set):
@@ -271,10 +341,50 @@ def repair_bad_citation_formats(answer: str, kbinfos: dict, idx: set):
     return answer, idx
 
 
+def _tts_text_len(text: str) -> int:
+    return len(re.sub(r"\s+", "", text or ""))
+
+
+def _slice_tts_buffer(buffer: str) -> tuple[list[str], str]:
+    parts = []
+    while True:
+        scan_end = min(len(buffer), TTS_STREAM_MAX_CHARS) + 1
+        indices = [buffer.rfind(ch, 0, scan_end) for ch in TTS_STREAM_PUNCTUATION]
+        split_idx = max(indices)
+        if split_idx < 0:
+            break
+        segment = buffer[: split_idx + 1]
+        if _tts_text_len(segment) < TTS_STREAM_MIN_CHARS:
+            break
+        parts.append(segment)
+        buffer = buffer[split_idx + 1 :]
+    return parts, buffer
+
+
+def _split_tts_buffer(buffer: str, last_flush_at: float, force: bool = False) -> tuple[list[str], str]:
+    outputs, buffer = _slice_tts_buffer(buffer)
+    due = time.monotonic() - last_flush_at >= TTS_STREAM_FLUSH_SECONDS
+
+    while _tts_text_len(buffer) >= TTS_STREAM_MAX_CHARS:
+        outputs.append(buffer[:TTS_STREAM_MAX_CHARS])
+        buffer = buffer[TTS_STREAM_MAX_CHARS:]
+
+    if force and _tts_text_len(buffer) > 0:
+        outputs.append(buffer)
+        return outputs, ""
+
+    if _tts_text_len(buffer) >= TTS_STREAM_MIN_CHARS and due:
+        outputs.append(buffer)
+        return outputs, ""
+
+    return outputs, buffer
+
+
 async def async_chat(dialog, messages, stream=True, **kwargs):
+    enable_tts = kwargs.pop("enable_tts", True)
     assert messages[-1]["role"] == "user", "The last content of this conversation is not from user."
     if not dialog.kb_ids and not dialog.prompt_config.get("tavily_api_key"):
-        async for ans in async_chat_solo(dialog, messages, stream):
+        async for ans in async_chat_solo(dialog, messages, stream, enable_tts=enable_tts):
             yield ans
         return
 
@@ -304,7 +414,7 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
             pass
 
     check_langfuse_tracer_ts = timer()
-    kbs, embd_mdl, rerank_mdl, chat_mdl, tts_mdl = get_models(dialog)
+    kbs, embd_mdl, rerank_mdl, chat_mdl, tts_mdl = get_models(dialog, enable_tts=enable_tts)
     toolcall_session, tools = kwargs.get("toolcall_session"), kwargs.get("tools")
     if toolcall_session and tools:
         chat_mdl.bind_tools(toolcall_session, tools)
@@ -362,86 +472,114 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
 
     kbinfos = {"total": 0, "chunks": [], "doc_aggs": []}
     knowledges = []
+    retrieval_failed = False
 
     if attachments is not None and "knowledge" in [p["key"] for p in prompt_config["parameters"]]:
         tenant_ids = list(set([kb.tenant_id for kb in kbs]))
         knowledges = []
-        if prompt_config.get("reasoning", False):
-            reasoner = DeepResearcher(
-                chat_mdl,
-                prompt_config,
-                partial(
-                    retriever.retrieval,
-                    embd_mdl=embd_mdl,
-                    tenant_ids=tenant_ids,
-                    kb_ids=dialog.kb_ids,
-                    page=1,
-                    page_size=dialog.top_n,
-                    similarity_threshold=0.2,
-                    vector_similarity_weight=0.3,
-                    doc_ids=attachments,
-                ),
-            )
-            queue = asyncio.Queue()
-            async def callback(msg:str):
-                nonlocal queue
-                await queue.put(msg + "<br/>")
-
-            await callback("<START_DEEP_RESEARCH>")
-            task = asyncio.create_task(reasoner.research(kbinfos, questions[-1], questions[-1], callback=callback))
-            while True:
-                msg = await queue.get()
-                if msg.find("<START_DEEP_RESEARCH>") == 0:
-                    continue
-                elif msg.find("<END_DEEP_RESEARCH>") == 0:
-                    break
-
-            await task
-
-        else:
-            if embd_mdl:
-                kbinfos = await retriever.retrieval(
-                    " ".join(questions),
-                    embd_mdl,
-                    tenant_ids,
-                    dialog.kb_ids,
-                    1,
-                    dialog.top_n,
-                    dialog.similarity_threshold,
-                    dialog.vector_similarity_weight,
-                    doc_ids=attachments,
-                    top=dialog.top_k,
-                    aggs=True,
-                    rerank_mdl=rerank_mdl,
-                    rank_feature=label_question(" ".join(questions), kbs),
+        try:
+            if prompt_config.get("reasoning", False):
+                reasoner = DeepResearcher(
+                    chat_mdl,
+                    prompt_config,
+                    partial(
+                        retriever.retrieval,
+                        embd_mdl=embd_mdl,
+                        tenant_ids=tenant_ids,
+                        kb_ids=dialog.kb_ids,
+                        page=1,
+                        page_size=dialog.top_n,
+                        similarity_threshold=0.2,
+                        vector_similarity_weight=0.3,
+                        doc_ids=attachments,
+                    ),
                 )
-                if prompt_config.get("toc_enhance"):
-                    cks = await retriever.retrieval_by_toc(" ".join(questions), kbinfos["chunks"], tenant_ids, chat_mdl, dialog.top_n)
-                    if cks:
-                        kbinfos["chunks"] = cks
-                kbinfos["chunks"] = retriever.retrieval_by_children(kbinfos["chunks"], tenant_ids)
-            if prompt_config.get("tavily_api_key"):
-                tav = Tavily(prompt_config["tavily_api_key"])
-                tav_res = tav.retrieve_chunks(" ".join(questions))
-                kbinfos["chunks"].extend(tav_res["chunks"])
-                kbinfos["doc_aggs"].extend(tav_res["doc_aggs"])
-            if prompt_config.get("use_kg"):
-                ck = await settings.kg_retriever.retrieval(" ".join(questions), tenant_ids, dialog.kb_ids, embd_mdl,
-                                                       LLMBundle(dialog.tenant_id, LLMType.CHAT))
-                if ck["content_with_weight"]:
-                    kbinfos["chunks"].insert(0, ck)
+                queue = asyncio.Queue()
+
+                async def callback(msg: str):
+                    nonlocal queue
+                    await queue.put(msg + "<br/>")
+
+                await callback("<START_DEEP_RESEARCH>")
+                task = asyncio.create_task(
+                    reasoner.research(
+                        kbinfos, questions[-1], questions[-1], callback=callback
+                    )
+                )
+                while True:
+                    msg = await queue.get()
+                    if msg.find("<START_DEEP_RESEARCH>") == 0:
+                        continue
+                    elif msg.find("<END_DEEP_RESEARCH>") == 0:
+                        break
+
+                await task
+
+            else:
+                if embd_mdl:
+                    kbinfos = await retriever.retrieval(
+                        " ".join(questions),
+                        embd_mdl,
+                        tenant_ids,
+                        dialog.kb_ids,
+                        1,
+                        dialog.top_n,
+                        dialog.similarity_threshold,
+                        dialog.vector_similarity_weight,
+                        doc_ids=attachments,
+                        top=dialog.top_k,
+                        aggs=True,
+                        rerank_mdl=rerank_mdl,
+                        rank_feature=label_question(" ".join(questions), kbs),
+                    )
+                    if prompt_config.get("toc_enhance"):
+                        cks = await retriever.retrieval_by_toc(
+                            " ".join(questions),
+                            kbinfos["chunks"],
+                            tenant_ids,
+                            chat_mdl,
+                            dialog.top_n,
+                        )
+                        if cks:
+                            kbinfos["chunks"] = cks
+                    kbinfos["chunks"] = retriever.retrieval_by_children(
+                        kbinfos["chunks"], tenant_ids
+                    )
+                if prompt_config.get("tavily_api_key"):
+                    tav = Tavily(prompt_config["tavily_api_key"])
+                    tav_res = tav.retrieve_chunks(" ".join(questions))
+                    kbinfos["chunks"].extend(tav_res["chunks"])
+                    kbinfos["doc_aggs"].extend(tav_res["doc_aggs"])
+                if prompt_config.get("use_kg"):
+                    ck = await settings.kg_retriever.retrieval(
+                        " ".join(questions),
+                        tenant_ids,
+                        dialog.kb_ids,
+                        embd_mdl,
+                        LLMBundle(dialog.tenant_id, LLMType.CHAT),
+                    )
+                    if ck["content_with_weight"]:
+                        kbinfos["chunks"].insert(0, ck)
+        except Exception:
+            retrieval_failed = True
+            kbinfos = {"total": 0, "chunks": [], "doc_aggs": []}
+            logging.exception(
+                "Knowledge retrieval failed; fallback to direct chat without retrieval."
+            )
 
     knowledges = kb_prompt(kbinfos, max_tokens)
     logging.debug("{}->{}".format(" ".join(questions), "\n->".join(knowledges)))
 
     retrieval_ts = timer()
-    if not knowledges and prompt_config.get("empty_response"):
+    if not knowledges and prompt_config.get("empty_response") and not retrieval_failed:
         empty_res = prompt_config["empty_response"]
         yield {"answer": empty_res, "reference": kbinfos, "prompt": "\n\n### Query:\n%s" % " ".join(questions),
                "audio_binary": tts(tts_mdl, empty_res), "final": True}
         return
 
-    kwargs["knowledge"] = "\n------\n" + "\n\n------\n\n".join(knowledges)
+    kwargs["knowledge"] = (
+        "\n------\n" + "\n\n------\n\n".join(knowledges) if knowledges else ""
+    )
     gen_conf = dialog.llm_setting
 
     msg = [{"role": "system", "content": prompt_config["system"].format(**kwargs)+attachments_}]
@@ -539,16 +677,55 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
     if stream:
         stream_iter = chat_mdl.async_chat_streamly_delta(prompt + prompt4citation, msg[1:], gen_conf)
         last_state = None
+        tts_buffer = ""
+        last_flush_at = time.monotonic()
         async for kind, value, state in _stream_with_think_delta(stream_iter):
             last_state = state
             if kind == "marker" or state.in_think:
                 continue
-            yield {"answer": value, "reference": {}, "audio_binary": tts(tts_mdl, value), "final": False}
+            yield {
+                "answer": value,
+                "reference": {},
+                "audio_binary": None,
+                "audio_mime_type": None,
+                "final": False,
+            }
+            if not tts_mdl:
+                continue
+            tts_buffer += value
+            flush_texts, tts_buffer = _split_tts_buffer(tts_buffer, last_flush_at, force=False)
+            for flush_text in flush_texts:
+                audio_binary = tts(tts_mdl, flush_text)
+                if not audio_binary:
+                    continue
+                yield {
+                    "answer": "",
+                    "reference": {},
+                    "audio_binary": audio_binary,
+                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
+                    "final": False,
+                }
+                last_flush_at = time.monotonic()
+        if tts_mdl:
+            flush_texts, _ = _split_tts_buffer(tts_buffer, last_flush_at, force=True)
+            for flush_text in flush_texts:
+                audio_binary = tts(tts_mdl, flush_text)
+                if not audio_binary:
+                    continue
+                yield {
+                    "answer": "",
+                    "reference": {},
+                    "audio_binary": audio_binary,
+                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
+                    "final": False,
+                }
+                last_flush_at = time.monotonic()
         full_answer = _remove_think_blocks(last_state.full_text) if last_state else ""
         if full_answer:
             final = decorate_answer(full_answer)
             final["final"] = True
-            final["audio_binary"] = None
+            final["audio_binary"] = tts(tts_mdl, full_answer)
+            final["audio_mime_type"] = _normalize_tts_mime_type(tts_mdl) if final["audio_binary"] else None
             final["answer"] = ""
             yield final
     else:
@@ -557,6 +734,7 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
         logging.debug("User: {}|Assistant: {}".format(user_content, answer))
         res = decorate_answer(answer)
         res["audio_binary"] = tts(tts_mdl, answer)
+        res["audio_mime_type"] = _normalize_tts_mime_type(tts_mdl) if res["audio_binary"] else None
         yield res
 
     return
@@ -691,9 +869,15 @@ def clean_tts_text(text: str) -> str:
     if not text:
         return ""
 
+    text = _remove_think_blocks(text)
     text = text.encode("utf-8", "ignore").decode("utf-8", "ignore")
-
     text = re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "", text)
+    text = re.sub(r"```[\s\S]*?```", " ", text)
+    text = re.sub(r"`[^`]*`", " ", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", " ", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+    text = re.sub(r"\[ID:\d+\]|##\d+\$\$|<[^>]+>", " ", text)
 
     emoji_pattern = re.compile(
         "[\U0001F600-\U0001F64F"
@@ -704,15 +888,37 @@ def clean_tts_text(text: str) -> str:
         "\U0001F900-\U0001F9FF"
         "\U0001FA70-\U0001FAFF"
         "\U0001FAD0-\U0001FAFF]+",
-        flags=re.UNICODE
+        flags=re.UNICODE,
     )
     text = emoji_pattern.sub("", text)
 
-    text = re.sub(r"\s+", " ", text).strip()
+    cleaned_lines = []
+    for raw_line in re.split(r"[\r\n]+", text):
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^\s*[-*+>#]+\s*", "", line)
+        line = re.sub(r"^\s*\d+[.)、]\s*", "", line)
+        line = re.sub(r"\|", " ", line)
+        line = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", line)
+        line = re.sub(r"_{1,2}([^_]+)_{1,2}", r"\1", line)
+        line = re.sub(r"[A-Za-z]+(?:[./_-][A-Za-z0-9]+)*", " ", line)
+        line = re.sub(r"\s+", " ", line).strip(" ,;；:：")
+        if not re.search(r"[\u4e00-\u9fff]", line):
+            continue
+        if not re.search(r"[。！？；!?]$", line):
+            line += "。"
+        cleaned_lines.append(line)
+
+    text = "".join(cleaned_lines)
+    text = re.sub(r"[ ]+", " ", text).strip()
+    text = re.sub(r"([。！？；]){2,}", r"\1", text)
 
     MAX_LEN = 500
     if len(text) > MAX_LEN:
-        text = text[:MAX_LEN]
+        text = text[:MAX_LEN].rstrip("，,;； ")
+        if not re.search(r"[。！？；!?]$", text):
+            text += "。"
 
     return text
 
@@ -724,6 +930,13 @@ def _remove_think_blocks(text: str) -> str:
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
     text = re.sub(r"<think>[\s\S]*$", "", text)
     return text.replace("</think>", "")
+
+
+def _normalize_tts_mime_type(tts_mdl, default: str = "audio/mpeg") -> str:
+    mime_type = getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", None)
+    if not mime_type:
+        return default
+    return mime_type.split(";", 1)[0].strip().lower() or default
 
 def tts(tts_mdl, text):
     if not tts_mdl or not text:

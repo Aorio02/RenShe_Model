@@ -25,9 +25,11 @@ import SvgIcon from '../svg-icon';
 import { useTheme } from '../theme-provider';
 import { AssistantGroupButton, UserGroupButton } from './group-button';
 import styles from './index.module.less';
+import { VoiceBubble } from './voice-bubble';
 
 interface IProps extends Partial<IRemoveMessageById>, IRegenerateMessage {
   item: IMessage;
+  conversationId?: string;
   reference: IReference;
   loading?: boolean;
   sendLoading?: boolean;
@@ -39,10 +41,12 @@ interface IProps extends Partial<IRemoveMessageById>, IRegenerateMessage {
   index: number;
   showLikeButton?: boolean;
   showLoudspeaker?: boolean;
+  retryVoiceMessage?(messageId: string): void;
 }
 
 const MessageItem = ({
   item,
+  conversationId,
   reference,
   loading = false,
   avatar,
@@ -55,6 +59,7 @@ const MessageItem = ({
   showLikeButton = true,
   showLoudspeaker = true,
   visibleAvatar = true,
+  retryVoiceMessage,
 }: IProps) => {
   const { theme } = useTheme();
   const isAssistant = item.role === MessageType.Assistant;
@@ -134,7 +139,7 @@ const MessageItem = ({
                   prompt={item.prompt}
                   showLikeButton={showLikeButton}
                   audioBinary={item.audio_binary}
-                  showLoudspeaker={showLoudspeaker}
+                  showLoudspeaker={showLoudspeaker && !item.voice && !loading}
                 ></AssistantGroupButton>
               )
             ) : (
@@ -151,6 +156,17 @@ const MessageItem = ({
               <PDFDownloadButton
                 downloadInfo={pdfDownloadInfo}
                 className="mb-2"
+              />
+            )}
+            {item.voice && (
+              <VoiceBubble
+                conversationId={conversationId}
+                messageId={item.id}
+                role={item.role}
+                displayText={isAssistant ? messageContent : undefined}
+                loading={loading}
+                voice={item.voice}
+                onRetry={retryVoiceMessage}
               />
             )}
             {/* Show message content if there's any text besides the download */}
