@@ -102,7 +102,7 @@ async def create(tenant_id):
         "parameters": [{"key": "knowledge", "optional": False}],
         "empty_response": "Sorry! No relevant content was found in the knowledge base!",
         "quote": True,
-        "tts": False,
+        "tts": True,
         "refine_multiturn": True,
     }
     key_list_2 = ["system", "prologue", "parameters", "empty_response", "quote", "tts", "refine_multiturn"]

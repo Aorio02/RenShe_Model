@@ -29,6 +29,8 @@ import { VoiceBubble } from './voice-bubble';
 
 interface IProps extends Partial<IRemoveMessageById>, IRegenerateMessage {
   item: IMessage;
+  assistantVoiceAutoPlayNonce?: number;
+  onAssistantVoiceAutoPlayConsumed?: (messageId: string, nonce?: number) => void;
   conversationId?: string;
   reference: IReference;
   loading?: boolean;
@@ -46,6 +48,8 @@ interface IProps extends Partial<IRemoveMessageById>, IRegenerateMessage {
 
 const MessageItem = ({
   item,
+  assistantVoiceAutoPlayNonce,
+  onAssistantVoiceAutoPlayConsumed,
   conversationId,
   reference,
   loading = false,
@@ -160,6 +164,10 @@ const MessageItem = ({
             )}
             {item.voice && (
               <VoiceBubble
+                assistantVoiceAutoPlayNonce={assistantVoiceAutoPlayNonce}
+                onAssistantVoiceAutoPlayConsumed={
+                  onAssistantVoiceAutoPlayConsumed
+                }
                 conversationId={conversationId}
                 messageId={item.id}
                 role={item.role}

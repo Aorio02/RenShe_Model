@@ -169,12 +169,16 @@ export const useSendMessage = (controller: AbortController) => {
   const { conversationId, isNew } = useGetChatSearchParams();
   const { handleInputChange, value, setValue } = useHandleMessageInputChange();
   const [voiceLoading, setVoiceLoading] = useState(false);
+  const [assistantVoiceAutoPlayNonceMap, setAssistantVoiceAutoPlayNonceMap] =
+    useState<Record<string, number>>({});
   const liveReplyStateRef = useRef<Map<string, LiveTtsState>>(new Map());
   const liveTtsQueueRef = useRef<Array<{ messageId: string; text: string }>>([]);
   const liveTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const liveTtsPlayingRef = useRef(false);
   const liveTtsBlockedRef = useRef(false);
   const liveTtsUrlsRef = useRef<Set<string>>(new Set());
+  const assistantVoiceAutoPlayIssuedRef = useRef<Set<string>>(new Set());
+  const assistantVoiceAutoPlayCounterRef = useRef(0);
 
   const { handleUploadFile, isUploading, removeFile, files, clearFiles } =
     useUploadFile();
@@ -238,6 +242,42 @@ export const useSendMessage = (controller: AbortController) => {
     sendMessage,
     messages: derivedMessages,
   });
+
+  const markAssistantVoiceAutoPlay = useCallback((messageId?: string) => {
+    if (
+      !messageId ||
+      assistantVoiceAutoPlayIssuedRef.current.has(messageId)
+    ) {
+      return;
+    }
+
+    assistantVoiceAutoPlayIssuedRef.current.add(messageId);
+    assistantVoiceAutoPlayCounterRef.current += 1;
+
+    setAssistantVoiceAutoPlayNonceMap((prev) => ({
+      ...prev,
+      [messageId]: assistantVoiceAutoPlayCounterRef.current,
+    }));
+  }, []);
+
+  const consumeAssistantVoiceAutoPlay = useCallback(
+    (messageId: string, nonce?: number) => {
+      if (!messageId || !nonce) {
+        return;
+      }
+
+      setAssistantVoiceAutoPlayNonceMap((prev) => {
+        if (prev[messageId] !== nonce) {
+          return prev;
+        }
+
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+    },
+    [],
+  );
 
   const { createConversationBeforeSendMessage } =
     useCreateConversationBeforeSendMessage();
@@ -833,12 +873,28 @@ export const useSendMessage = (controller: AbortController) => {
 
   useEffect(() => {
     //  #1289
-    if (answer.answer && conversationId && isNew !== 'true') {
+    if (answer.id && answer.audio_binary) {
+      markAssistantVoiceAutoPlay(answer.id);
+    }
+
+    if (
+      (answer.answer || answer.audio_binary) &&
+      conversationId &&
+      isNew !== 'true'
+    ) {
       addNewestAnswer(answer);
     }
-  }, [answer, addNewestAnswer, conversationId, isNew]);
+  }, [
+    answer,
+    addNewestAnswer,
+    conversationId,
+    isNew,
+    markAssistantVoiceAutoPlay,
+  ]);
 
   return {
+    assistantVoiceAutoPlayNonceMap,
+    consumeAssistantVoiceAutoPlay,
     handlePressEnter,
     handleInputChange,
     handleVoiceSubmit,

@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface VoiceBubbleProps {
+  assistantVoiceAutoPlayNonce?: number;
+  onAssistantVoiceAutoPlayConsumed?: (messageId: string, nonce?: number) => void;
   conversationId?: string;
   messageId: string;
   role: 'user' | 'assistant';
@@ -19,6 +21,8 @@ interface VoiceBubbleProps {
 }
 
 export function VoiceBubble({
+  assistantVoiceAutoPlayNonce,
+  onAssistantVoiceAutoPlayConsumed,
   conversationId,
   messageId,
   role,
@@ -32,6 +36,7 @@ export function VoiceBubble({
   const cachedUrlRef = useRef<Map<string, string>>(new Map());
   const nextSegmentIndexRef = useRef(0);
   const playbackModeRef = useRef<'single' | 'segments'>('segments');
+  const autoPlayedNonceRef = useRef<number | undefined>(undefined);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const segments = useMemo(() => voice?.segments ?? [], [voice?.segments]);
@@ -294,6 +299,60 @@ export function VoiceBubble({
       audio.removeEventListener('ended', onEnded);
     };
   }, [playSegment, segments.length, voice?.kind]);
+
+  useEffect(() => {
+    if (
+      role !== 'assistant' ||
+      !assistantVoiceAutoPlayNonce ||
+      autoPlayedNonceRef.current === assistantVoiceAutoPlayNonce ||
+      !voice ||
+      isPlaying
+    ) {
+      return;
+    }
+
+    const canAutoPlaySegments =
+      voice.kind === 'segments' && segments.length > 0;
+    const canAutoPlaySingle =
+      voice.kind === 'single' && Boolean(voice.file_id || voice.local_url);
+
+    if (!canAutoPlaySegments && !canAutoPlaySingle) {
+      return;
+    }
+
+    autoPlayedNonceRef.current = assistantVoiceAutoPlayNonce;
+    onAssistantVoiceAutoPlayConsumed?.(
+      messageId,
+      assistantVoiceAutoPlayNonce,
+    );
+
+    const startPlayback = async () => {
+      if (canAutoPlaySegments) {
+        nextSegmentIndexRef.current = 0;
+        await playSegment(0);
+        return;
+      }
+      await playSingle();
+    };
+
+    void startPlayback().catch((error) => {
+      setIsPlaying(false);
+      if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        return;
+      }
+      console.warn('assistant voice autoplay failed', error);
+    });
+  }, [
+    assistantVoiceAutoPlayNonce,
+    isPlaying,
+    messageId,
+    onAssistantVoiceAutoPlayConsumed,
+    playSegment,
+    playSingle,
+    role,
+    segments.length,
+    voice,
+  ]);
 
   const handleTogglePlayback = useCallback(async () => {
     const audio = audioRef.current;

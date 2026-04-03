@@ -42,7 +42,7 @@ export function ChatSettings({ switchSettingVisible }: ChatSettingsProps) {
       prompt_config: {
         quote: true,
         keyword: false,
-        tts: false,
+        tts: true,
         use_kg: false,
         refine_multiturn: true,
         system: '',

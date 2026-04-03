@@ -31,6 +31,8 @@ export function SingleChatBox({
   conversation,
 }: IProps) {
   const {
+    assistantVoiceAutoPlayNonceMap,
+    consumeAssistantVoiceAutoPlay,
     value,
     scrollRef,
     messageContainerRef,
@@ -98,6 +100,12 @@ export function SingleChatBox({
                 }
                 key={buildMessageUuidWithRole(message)}
                 item={message}
+                assistantVoiceAutoPlayNonce={
+                  message.role === MessageType.Assistant
+                    ? assistantVoiceAutoPlayNonceMap[message.id]
+                    : undefined
+                }
+                onAssistantVoiceAutoPlayConsumed={consumeAssistantVoiceAutoPlay}
                 conversationId={conversationId}
                 nickname={userInfo.nickname}
                 avatar={userInfo.avatar}

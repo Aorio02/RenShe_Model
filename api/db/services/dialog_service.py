@@ -199,8 +199,6 @@ async def async_chat_solo(dialog, messages, stream=True, enable_tts=True):
     if stream:
         stream_iter = chat_mdl.async_chat_streamly_delta(prompt_config.get("system", ""), msg, dialog.llm_setting)
         last_state = None
-        tts_buffer = ""
-        last_flush_at = time.monotonic()
         async for kind, value, state in _stream_with_think_delta(stream_iter):
             last_state = state
             if kind == "marker" or state.in_think:
@@ -214,40 +212,6 @@ async def async_chat_solo(dialog, messages, stream=True, enable_tts=True):
                 "created_at": time.time(),
                 "final": False,
             }
-            if not tts_mdl:
-                continue
-            tts_buffer += value
-            flush_texts, tts_buffer = _split_tts_buffer(tts_buffer, last_flush_at, force=False)
-            for flush_text in flush_texts:
-                audio_binary = tts(tts_mdl, flush_text)
-                if not audio_binary:
-                    continue
-                yield {
-                    "answer": "",
-                    "reference": {},
-                    "audio_binary": audio_binary,
-                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
-                    "prompt": "",
-                    "created_at": time.time(),
-                    "final": False,
-                }
-                last_flush_at = time.monotonic()
-        if tts_mdl:
-            flush_texts, _ = _split_tts_buffer(tts_buffer, last_flush_at, force=True)
-            for flush_text in flush_texts:
-                audio_binary = tts(tts_mdl, flush_text)
-                if not audio_binary:
-                    continue
-                yield {
-                    "answer": "",
-                    "reference": {},
-                    "audio_binary": audio_binary,
-                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
-                    "prompt": "",
-                    "created_at": time.time(),
-                    "final": False,
-                }
-                last_flush_at = time.monotonic()
         full_answer = _remove_think_blocks(last_state.full_text) if last_state else ""
         audio_binary = tts(tts_mdl, full_answer)
         yield {
@@ -677,8 +641,6 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
     if stream:
         stream_iter = chat_mdl.async_chat_streamly_delta(prompt + prompt4citation, msg[1:], gen_conf)
         last_state = None
-        tts_buffer = ""
-        last_flush_at = time.monotonic()
         async for kind, value, state in _stream_with_think_delta(stream_iter):
             last_state = state
             if kind == "marker" or state.in_think:
@@ -690,36 +652,6 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
                 "audio_mime_type": None,
                 "final": False,
             }
-            if not tts_mdl:
-                continue
-            tts_buffer += value
-            flush_texts, tts_buffer = _split_tts_buffer(tts_buffer, last_flush_at, force=False)
-            for flush_text in flush_texts:
-                audio_binary = tts(tts_mdl, flush_text)
-                if not audio_binary:
-                    continue
-                yield {
-                    "answer": "",
-                    "reference": {},
-                    "audio_binary": audio_binary,
-                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
-                    "final": False,
-                }
-                last_flush_at = time.monotonic()
-        if tts_mdl:
-            flush_texts, _ = _split_tts_buffer(tts_buffer, last_flush_at, force=True)
-            for flush_text in flush_texts:
-                audio_binary = tts(tts_mdl, flush_text)
-                if not audio_binary:
-                    continue
-                yield {
-                    "answer": "",
-                    "reference": {},
-                    "audio_binary": audio_binary,
-                    "audio_mime_type": _normalize_tts_mime_type(tts_mdl),
-                    "final": False,
-                }
-                last_flush_at = time.monotonic()
         full_answer = _remove_think_blocks(last_state.full_text) if last_state else ""
         if full_answer:
             final = decorate_answer(full_answer)

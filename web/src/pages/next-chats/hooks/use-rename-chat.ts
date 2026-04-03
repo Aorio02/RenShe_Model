@@ -28,7 +28,7 @@ export const useRenameChat = () => {
         prologue: t('chat.setAnOpenerInitial'),
         quote: true,
         keyword: false,
-        tts: false,
+        tts: true,
         system: t('chat.systemInitialValue'),
         refine_multiturn: false,
         use_kg: true, 

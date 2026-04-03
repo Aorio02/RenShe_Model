@@ -512,13 +512,15 @@ const mergeStreamingVoice = (
     return answer.voice;
   }
 
+  if (previousVoice?.kind === 'segments' && answer.final) {
+    return {
+      ...previousVoice,
+      status: 'ready',
+      mime_type: answer.audio_mime_type ?? previousVoice.mime_type,
+    };
+  }
+
   if (!answer.audio_binary) {
-    if (previousVoice?.kind === 'segments' && answer.final) {
-      return {
-        ...previousVoice,
-        status: 'ready',
-      };
-    }
     return previousVoice;
   }
 
