@@ -314,6 +314,7 @@ export interface ISystemModelSettingSavingParams {
 
 export const useSaveTenantInfo = () => {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const {
     data,
     isPending: loading,
@@ -324,6 +325,7 @@ export const useSaveTenantInfo = () => {
       const { data } = await userService.set_tenant_info(params);
       if (data.code === 0) {
         message.success(t('message.modified'));
+        queryClient.invalidateQueries({ queryKey: ['tenantInfo'] });
       }
       return data.code;
     },

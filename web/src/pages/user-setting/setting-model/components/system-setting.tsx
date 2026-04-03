@@ -25,7 +25,7 @@ interface IProps {
 }
 
 const SystemSetting = ({ onOk, loading }: IProps) => {
-  const { systemSetting: initialValues, allOptions } =
+  const { systemSetting: initialValues, allOptions, loading: tenantLoading } =
     useFetchSystemModelSettingOnMount();
   const { t } = useTranslate('setting');
 
@@ -37,15 +37,19 @@ const SystemSetting = ({ onOk, loading }: IProps) => {
     rerank_id: '',
     tts_id: '',
   });
+  const isTenantReady = Boolean(initialValues?.tenant_id);
+  const isDisabled = loading || tenantLoading || !isTenantReady;
 
   const handleFieldChange = useCallback(
     (field: string, value: string) => {
+      if (isDisabled) {
+        return;
+      }
       const updatedData = { ...formData, [field]: value || '' };
       setFormData(updatedData);
-      console.log('updatedData', updatedData);
       onOk(updatedData);
     },
-    [formData, onOk],
+    [formData, isDisabled, onOk],
   );
 
   useEffect(() => {
@@ -159,6 +163,7 @@ const SystemSetting = ({ onOk, loading }: IProps) => {
           allowClear={id !== 'llm_id'}
           value={value}
           options={options}
+          disabled={isDisabled}
           onChange={(value) => handleFieldChange(id, value)}
           placeholder={t('selectModelPlaceholder')}
           emptyData={t('modelEmptyTip')}

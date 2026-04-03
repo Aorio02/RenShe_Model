@@ -52,17 +52,19 @@ export const useFetchUserInfo = (): ResponseGetType<IUserInfo> => {
   const queryClient = useQueryClient();
   const queryKey = [UserSettingApiAction.UserInfo] as const;
   const cachedInitialData = queryClient.getQueryData<IUserInfo>(queryKey);
+  const hasCachedInitialData = !isEmpty(cachedInitialData);
 
   const { data, isFetching: loading } = useQuery({
     queryKey,
-    initialData: () => cachedInitialData ?? ({} as IUserInfo),
+    initialData: hasCachedInitialData ? cachedInitialData : undefined,
     gcTime: USER_SETTING_GC_TIME,
-    staleTime: cachedInitialData ? USER_SETTING_STALE_TIME : 0,
+    staleTime: hasCachedInitialData ? USER_SETTING_STALE_TIME : 0,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
+    refetchOnReconnect: true,
+    retry: 2,
     queryFn: async () => {
       const cachedData = queryClient.getQueryData<IUserInfo>(queryKey);
+      const hasCachedData = !isEmpty(cachedData);
 
       try {
         const { data } = await userService.user_info();
@@ -78,13 +80,13 @@ export const useFetchUserInfo = (): ResponseGetType<IUserInfo> => {
           return userInfo;
         }
       } catch {
-        if (cachedData) {
+        if (hasCachedData) {
           return cachedData;
         }
         throw new Error('Failed to fetch user info');
       }
 
-      if (cachedData) {
+      if (hasCachedData) {
         return cachedData;
       }
 
@@ -92,7 +94,7 @@ export const useFetchUserInfo = (): ResponseGetType<IUserInfo> => {
     },
   });
 
-  return { data, loading };
+  return { data: data ?? ({} as IUserInfo), loading };
 };
 
 export const useFetchTenantInfo = (
@@ -103,16 +105,18 @@ export const useFetchTenantInfo = (
   const warnedEmptyModelRef = useRef(false);
   const queryKey = [UserSettingApiAction.TenantInfo] as const;
   const cachedInitialData = queryClient.getQueryData<ITenantInfo>(queryKey);
+  const hasCachedInitialData = !isEmpty(cachedInitialData);
   const { data, isFetching: loading, isFetched } = useQuery({
     queryKey,
-    initialData: () => cachedInitialData ?? ({} as ITenantInfo),
+    initialData: hasCachedInitialData ? cachedInitialData : undefined,
     gcTime: USER_SETTING_GC_TIME,
-    staleTime: cachedInitialData ? USER_SETTING_STALE_TIME : 0,
+    staleTime: hasCachedInitialData ? USER_SETTING_STALE_TIME : 0,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
+    refetchOnReconnect: true,
+    retry: 2,
     queryFn: async () => {
       const cachedData = queryClient.getQueryData<ITenantInfo>(queryKey);
+      const hasCachedData = !isEmpty(cachedData);
 
       try {
         const { data: res } = await userService.get_tenant_info();
@@ -126,13 +130,13 @@ export const useFetchTenantInfo = (
           return tenantData;
         }
       } catch {
-        if (cachedData) {
+        if (hasCachedData) {
           return cachedData;
         }
         throw new Error('Failed to fetch tenant info');
       }
 
-      if (cachedData) {
+      if (hasCachedData) {
         return cachedData;
       }
 
@@ -180,7 +184,7 @@ export const useFetchTenantInfo = (
     });
   }, [data, data?.embd_id, data?.llm_id, isFetched, showEmptyModelWarn, t]);
 
-  return { data, loading };
+  return { data: data ?? ({} as ITenantInfo), loading };
 };
 
 const DEFAULT_PARSERS = [

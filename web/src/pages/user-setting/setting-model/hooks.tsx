@@ -75,6 +75,7 @@ export const useSubmitSystemModelSetting = () => {
   const { data: systemSetting } = useFetchTenantInfo();
   const { saveTenantInfo: saveSystemModelSetting, loading } =
     useSaveTenantInfo();
+  const queryClient = useQueryClient();
   const {
     visible: systemSettingVisible,
     hideModal: hideSystemSettingModal,
@@ -86,6 +87,7 @@ export const useSubmitSystemModelSetting = () => {
       payload: Omit<ISystemModelSettingSavingParams, 'tenant_id' | 'name'>,
     ) => {
       if (!systemSetting.tenant_id) {
+        queryClient.invalidateQueries({ queryKey: ['tenantInfo'] });
         message.error('租户信息尚未加载完成，请稍后重试');
         return;
       }
@@ -100,7 +102,7 @@ export const useSubmitSystemModelSetting = () => {
         hideSystemSettingModal();
       }
     },
-    [hideSystemSettingModal, saveSystemModelSetting, systemSetting],
+    [hideSystemSettingModal, queryClient, saveSystemModelSetting, systemSetting],
   );
 
   return {
@@ -113,10 +115,10 @@ export const useSubmitSystemModelSetting = () => {
 };
 
 export const useFetchSystemModelSettingOnMount = () => {
-  const { data: systemSetting } = useFetchTenantInfo();
+  const { data: systemSetting, loading } = useFetchTenantInfo();
   const allOptions = useSelectLlmOptionsByModelType();
 
-  return { systemSetting, allOptions };
+  return { systemSetting, allOptions, loading };
 };
 
 export const useSubmitOllama = () => {
