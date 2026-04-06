@@ -171,7 +171,6 @@ const MessageItem = ({
                 conversationId={conversationId}
                 messageId={item.id}
                 role={item.role}
-                displayText={isAssistant ? messageContent : undefined}
                 loading={loading}
                 voice={item.voice}
                 onRetry={retryVoiceMessage}

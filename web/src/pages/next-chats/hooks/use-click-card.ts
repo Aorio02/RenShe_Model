@@ -1,24 +1,22 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { useChatUrlParams } from './use-chat-url';
 
 export function useHandleClickConversationCard() {
-  const [controller, setController] = useState(new AbortController());
+  const controllerRef = useRef(new AbortController());
   const { setConversationBoth } = useChatUrlParams();
 
   const stopOutputMessage = useCallback(() => {
-    setController((pre) => {
-      pre.abort();
-      return new AbortController();
-    });
+    controllerRef.current.abort();
+    controllerRef.current = new AbortController();
   }, []);
 
   const handleConversationCardClick = useCallback(
     (conversationId: string, isNew: boolean) => {
-      setConversationBoth(conversationId, isNew ? 'true' : '');
       stopOutputMessage();
+      setConversationBoth(conversationId, isNew ? 'true' : '');
     },
     [setConversationBoth, stopOutputMessage],
   );
 
-  return { controller, handleConversationCardClick, stopOutputMessage };
+  return { controllerRef, handleConversationCardClick, stopOutputMessage };
 }

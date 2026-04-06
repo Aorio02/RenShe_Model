@@ -26,7 +26,13 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { t } from 'i18next';
 import { isEmpty, omit } from 'lodash';
 import { ListCheck, Plus, Trash2 } from 'lucide-react';
-import { forwardRef, useCallback, useImperativeHandle, useRef } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useRef,
+  type MutableRefObject,
+} from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router';
 import { z } from 'zod';
@@ -42,7 +48,7 @@ import { useAddChatBox } from '../use-add-box';
 import { useSetDefaultModel } from './use-set-default-model';
 
 type MultipleChatBoxProps = {
-  controller: AbortController;
+  controllerRef: MutableRefObject<AbortController>;
   chatBoxIds: string[];
   stopOutputMessage(): void;
   conversation: IClientConversation;
@@ -59,13 +65,13 @@ type ChatCardProps = {
   conversation: IClientConversation;
 } & Pick<
   MultipleChatBoxProps,
-  'controller' | 'removeChatBox' | 'addChatBox' | 'chatBoxIds'
+  'controllerRef' | 'removeChatBox' | 'addChatBox' | 'chatBoxIds'
 > &
   Pick<ReturnType<typeof useClickDrawer>, 'clickDocumentButton'>;
 
 const ChatCard = forwardRef(function ChatCard(
   {
-    controller,
+    controllerRef,
     removeChatBox,
     id,
     idx,
@@ -81,7 +87,8 @@ const ChatCard = forwardRef(function ChatCard(
   const { id: dialogId } = useParams();
   const { setDialog } = useSetDialog();
 
-  const { regenerateMessage, removeMessageById } = useSendMessage(controller);
+  const { regenerateMessage, removeMessageById } =
+    useSendMessage(controllerRef);
 
   const messageContainerRef = useRef<HTMLDivElement>(null);
 
@@ -201,7 +208,7 @@ const ChatCard = forwardRef(function ChatCard(
 });
 
 export function MultipleChatBox({
-  controller,
+  controllerRef,
   chatBoxIds,
   removeChatBox,
   addChatBox,
@@ -216,7 +223,7 @@ export function MultipleChatBox({
     handlePressEnter,
     setFormRef,
     handleUploadFile,
-  } = useSendMultipleChatMessage(controller, chatBoxIds);
+  } = useSendMultipleChatMessage(controllerRef, chatBoxIds);
 
   const { createConversationBeforeUploadDocument } =
     useCreateConversationBeforeUploadDocument();
@@ -233,7 +240,7 @@ export function MultipleChatBox({
           <ChatCard
             key={id}
             idx={idx}
-            controller={controller}
+            controllerRef={controllerRef}
             id={id}
             chatBoxIds={chatBoxIds}
             removeChatBox={removeChatBox}

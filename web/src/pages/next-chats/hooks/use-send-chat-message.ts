@@ -6,95 +6,31 @@ import {
   useSelectDerivedMessages,
   useSendMessageWithSse,
 } from '@/hooks/logic-hooks';
-import { useGetChatSearchParams } from '@/hooks/use-chat-request';
+import {
+  useFetchConversationManually,
+  useFetchDialog,
+  useGetChatSearchParams,
+} from '@/hooks/use-chat-request';
 import { IMessage } from '@/interfaces/database/chat';
 import { RecordedVoicePayload } from '@/components/ui/audio-button';
 import api from '@/utils/api';
-import {
-  buildMessageUuid,
-  removeThinkBlocks,
-  sanitizeMessagesForRequest,
-} from '@/utils/chat';
+import { buildMessageUuid, sanitizeMessagesForRequest } from '@/utils/chat';
 import { getAuthorization } from '@/utils/authorization-util';
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import { trim } from 'lodash';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 import { useParams } from 'react-router';
 import { v4 as uuid } from 'uuid';
 import { useCreateConversationBeforeSendMessage } from './use-chat-url';
 import { useFindPrologueFromDialogList } from './use-select-conversation-list';
 import { useUploadFile } from './use-upload-file';
-
-const LIVE_TTS_MIN_CHARS = 12;
-const LIVE_TTS_MAX_CHARS = 40;
-const LIVE_TTS_PUNCTUATION = '。！？；!?;';
-
-type LiveTtsState = {
-  rawContent: string;
-  renderedText: string;
-  pendingBuffer: string;
-};
-
-const normalizeLiveTtsText = (text: string = '') => {
-  return removeThinkBlocks(text)
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/https?:\/\/\S+|www\.\S+/g, ' ')
-    .replace(/\[ID:\d+\]|##\d+\$\$|<[^>]+>/g, ' ')
-    .replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')
-    .replace(/_{1,2}([^_]+)_{1,2}/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
-const getCommonPrefixLength = (left: string, right: string) => {
-  const max = Math.min(left.length, right.length);
-  let index = 0;
-  while (index < max && left[index] === right[index]) {
-    index += 1;
-  }
-  return index;
-};
-
-const splitLiveTtsBuffer = (buffer: string, force: boolean = false) => {
-  const outputs: string[] = [];
-  let pending = buffer;
-
-  while (pending.length >= LIVE_TTS_MIN_CHARS) {
-    const scanLimit = Math.min(pending.length, LIVE_TTS_MAX_CHARS);
-    let splitIndex = -1;
-
-    for (let index = scanLimit - 1; index >= 0; index -= 1) {
-      if (LIVE_TTS_PUNCTUATION.includes(pending[index])) {
-        splitIndex = index;
-        break;
-      }
-    }
-
-    if (splitIndex < 0) {
-      break;
-    }
-
-    outputs.push(pending.slice(0, splitIndex + 1).trim());
-    pending = pending.slice(splitIndex + 1).trimStart();
-  }
-
-  while (pending.length >= LIVE_TTS_MAX_CHARS) {
-    outputs.push(pending.slice(0, LIVE_TTS_MAX_CHARS).trim());
-    pending = pending.slice(LIVE_TTS_MAX_CHARS).trimStart();
-  }
-
-  if (force && pending.trim()) {
-    outputs.push(pending.trim());
-    pending = '';
-  }
-
-  return [outputs.filter(Boolean), pending] as const;
-};
-
-const hasReadableChinese = (text: string) => /[\u4e00-\u9fff]/.test(text);
 
 const sortVoiceSegments = (
   segments: NonNullable<IMessage['voice']>['segments'] = [],
@@ -165,23 +101,27 @@ export const useSelectNextMessages = () => {
   };
 };
 
-export const useSendMessage = (controller: AbortController) => {
+export const useSendMessage = (
+  controllerRef: MutableRefObject<AbortController>,
+) => {
   const { conversationId, isNew } = useGetChatSearchParams();
+  const { data: currentDialog } = useFetchDialog();
   const { handleInputChange, value, setValue } = useHandleMessageInputChange();
   const [voiceLoading, setVoiceLoading] = useState(false);
+  const [loadingAssistantId, setLoadingAssistantId] = useState('');
   const [assistantVoiceAutoPlayNonceMap, setAssistantVoiceAutoPlayNonceMap] =
     useState<Record<string, number>>({});
-  const liveReplyStateRef = useRef<Map<string, LiveTtsState>>(new Map());
-  const liveTtsQueueRef = useRef<Array<{ messageId: string; text: string }>>([]);
-  const liveTtsAudioRef = useRef<HTMLAudioElement | null>(null);
-  const liveTtsPlayingRef = useRef(false);
-  const liveTtsBlockedRef = useRef(false);
-  const liveTtsUrlsRef = useRef<Set<string>>(new Set());
+  const derivedMessagesRef = useRef<IMessage[]>([]);
+  const autoPlayEligibleAssistantIdsRef = useRef<Set<string>>(new Set());
+  const previousConversationIdRef = useRef(conversationId);
+  const ttsPollingTimerRef = useRef<number | null>(null);
+  const ttsPollingInFlightRef = useRef(false);
   const assistantVoiceAutoPlayIssuedRef = useRef<Set<string>>(new Set());
   const assistantVoiceAutoPlayCounterRef = useRef(0);
 
   const { handleUploadFile, isUploading, removeFile, files, clearFiles } =
     useUploadFile();
+  const { fetchConversationManually } = useFetchConversationManually();
 
   const { send, answer, done } = useSendMessageWithSse(
     api.completeConversation,
@@ -211,6 +151,7 @@ export const useSendMessage = (controller: AbortController) => {
       const res = await send(
         {
           conversation_id: currentConversationId ?? conversationId,
+          live_tts: Boolean(currentDialog?.prompt_config?.tts),
           messages: sanitizeMessagesForRequest([
             ...(Array.isArray(messages) && messages?.length > 0
               ? messages
@@ -218,10 +159,11 @@ export const useSendMessage = (controller: AbortController) => {
             message,
           ]),
         },
-        controller,
+        controllerRef.current,
       );
 
       if (res && (res?.response.status !== 200 || res?.data?.code !== 0)) {
+        setLoadingAssistantId('');
         // cancel loading
         setValue(message.content);
         removeLatestMessage();
@@ -230,10 +172,11 @@ export const useSendMessage = (controller: AbortController) => {
     [
       derivedMessages,
       conversationId,
+      currentDialog?.prompt_config?.tts,
       removeLatestMessage,
       setValue,
       send,
-      controller,
+      controllerRef,
     ],
   );
 
@@ -242,6 +185,18 @@ export const useSendMessage = (controller: AbortController) => {
     sendMessage,
     messages: derivedMessages,
   });
+
+  const assistantVoicePlaceholder = useMemo(
+    () =>
+      currentDialog?.prompt_config?.tts
+        ? {
+            kind: 'single' as const,
+            status: 'streaming' as const,
+            mime_type: 'audio/mpeg',
+          }
+        : undefined,
+    [currentDialog?.prompt_config?.tts],
+  );
 
   const markAssistantVoiceAutoPlay = useCallback((messageId?: string) => {
     if (
@@ -315,128 +270,149 @@ export const useSendMessage = (controller: AbortController) => {
     [setDerivedMessages],
   );
 
-  const revokeLiveTtsUrls = useCallback(() => {
-    liveTtsUrlsRef.current.forEach((url) => {
-      if (url.startsWith('blob:')) {
-        URL.revokeObjectURL(url);
-      }
-    });
-    liveTtsUrlsRef.current.clear();
-  }, []);
-
-  const fetchLiveTtsAudioUrl = useCallback(async (text: string) => {
-    const response = await fetch(api.tts, {
-      method: 'POST',
-      headers: {
-        [Authorization]: getAuthorization(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text }),
-    });
-
-    const contentType =
-      response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() ||
-      '';
-
-    if (!response.ok || contentType.includes('json')) {
-      throw new Error(`tts request failed: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    if (!blob.size) {
-      throw new Error('voice file is empty');
-    }
-
-    const objectUrl = URL.createObjectURL(blob);
-    liveTtsUrlsRef.current.add(objectUrl);
-    return objectUrl;
-  }, []);
-
-  const playLiveTtsQueue = useCallback(async () => {
-    const audio = liveTtsAudioRef.current;
-    if (!audio || liveTtsPlayingRef.current || liveTtsBlockedRef.current) {
+  const addAutoPlayEligibleAssistant = useCallback((messageId?: string) => {
+    if (!messageId) {
       return;
     }
+    autoPlayEligibleAssistantIdsRef.current.add(messageId);
+    assistantVoiceAutoPlayIssuedRef.current.delete(messageId);
+  }, []);
 
-    liveTtsPlayingRef.current = true;
-    try {
-      while (liveTtsQueueRef.current.length > 0) {
-        const item = liveTtsQueueRef.current.shift();
-        if (!item || !hasReadableChinese(item.text)) {
-          continue;
-        }
-
-        const objectUrl = await fetchLiveTtsAudioUrl(item.text);
-        audio.pause();
-        audio.currentTime = 0;
-        audio.src = objectUrl;
-        audio.load();
-        await audio.play();
-        await new Promise<void>((resolve, reject) => {
-          let onEnded: () => void = () => {};
-          let onError: () => void = () => {};
-          const cleanup = () => {
-            audio.removeEventListener('ended', onEnded);
-            audio.removeEventListener('error', onError);
-          };
-          onEnded = () => {
-            cleanup();
-            resolve();
-          };
-          onError = () => {
-            cleanup();
-            reject(new Error('live tts playback failed'));
-          };
-          audio.addEventListener('ended', onEnded);
-          audio.addEventListener('error', onError);
-        });
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'NotAllowedError') {
-        liveTtsBlockedRef.current = true;
-      }
-      liveTtsQueueRef.current = [];
-    } finally {
-      liveTtsPlayingRef.current = false;
+  const removeAutoPlayEligibleAssistant = useCallback((messageId?: string) => {
+    if (!messageId) {
+      return;
     }
-  }, [fetchLiveTtsAudioUrl]);
+    autoPlayEligibleAssistantIdsRef.current.delete(messageId);
+  }, []);
 
-  const enqueueLiveTtsText = useCallback(
-    (messageId: string, rawContent: string, force: boolean = false) => {
-      const previous =
-        liveReplyStateRef.current.get(messageId) ?? {
-          rawContent: '',
-          renderedText: '',
-          pendingBuffer: '',
-        };
-      const nextRenderedText = normalizeLiveTtsText(rawContent);
-      const prefixLength = nextRenderedText.startsWith(previous.renderedText)
-        ? previous.renderedText.length
-        : getCommonPrefixLength(previous.renderedText, nextRenderedText);
-      const nextPendingBuffer =
-        (prefixLength < previous.renderedText.length ? '' : previous.pendingBuffer) +
-        nextRenderedText.slice(prefixLength);
-      const [segments, rest] = splitLiveTtsBuffer(nextPendingBuffer, force);
+  const stopAssistantTtsPolling = useCallback(() => {
+    if (ttsPollingTimerRef.current !== null) {
+      window.clearTimeout(ttsPollingTimerRef.current);
+      ttsPollingTimerRef.current = null;
+    }
+    ttsPollingInFlightRef.current = false;
+  }, []);
 
-      if (force) {
-        liveReplyStateRef.current.delete(messageId);
-      } else {
-        liveReplyStateRef.current.set(messageId, {
-          rawContent,
-          renderedText: nextRenderedText,
-          pendingBuffer: rest,
-        });
+  const mergeAssistantVoiceFromConversation = useCallback(
+    (serverMessages: IMessage[] = []) => {
+      if (!serverMessages.length) {
+        return;
       }
 
-      segments.forEach((segment) => {
-        if (segment.trim()) {
-          liveTtsQueueRef.current.push({ messageId, text: segment.trim() });
-        }
-      });
+      const currentMessages = derivedMessagesRef.current;
+      const assistantMessageMap = new Map(
+        serverMessages
+          .filter(
+            (message) =>
+              message.role === MessageType.Assistant && typeof message.id === 'string',
+          )
+          .map((message) => [message.id, message] as const),
+      );
 
-      void playLiveTtsQueue();
+      const readyToAutoPlayIds = currentMessages
+        .filter((message) => {
+          if (message.role !== MessageType.Assistant || !message.id) {
+            return false;
+          }
+          if (!autoPlayEligibleAssistantIdsRef.current.has(message.id)) {
+            return false;
+          }
+          const nextVoice = assistantMessageMap.get(message.id)?.voice;
+          return (
+            message.voice?.status !== 'ready' &&
+            nextVoice?.status === 'ready' &&
+            nextVoice.kind === 'single' &&
+            Boolean(nextVoice.file_id)
+          );
+        })
+        .map((message) => message.id);
+
+      const completedMessageIds = currentMessages
+        .filter((message) => {
+          if (message.role !== MessageType.Assistant || !message.id) {
+            return false;
+          }
+          if (!autoPlayEligibleAssistantIdsRef.current.has(message.id)) {
+            return false;
+          }
+          const nextVoice = assistantMessageMap.get(message.id)?.voice;
+          return Boolean(nextVoice && nextVoice.status !== 'streaming');
+        })
+        .map((message) => message.id);
+
+      setDerivedMessages((prev) =>
+        prev.map((message) => {
+          if (message.role !== MessageType.Assistant || !message.id) {
+            return message;
+          }
+
+          const serverMessage = assistantMessageMap.get(message.id);
+          if (!serverMessage?.voice) {
+            return message;
+          }
+
+          const previousSegments = message.voice?.segments ?? [];
+          const nextSegments = Array.isArray(serverMessage.voice.segments)
+            ? sortVoiceSegments(
+                serverMessage.voice.segments.map((segment) => {
+                  const previousSegment = previousSegments.find(
+                    (item) => item.seq === segment.seq,
+                  );
+
+                  return {
+                    ...segment,
+                    object_url: segment.file_id
+                      ? undefined
+                      : previousSegment?.object_url,
+                  };
+                }),
+              )
+            : undefined;
+
+          return {
+            ...message,
+            voice: {
+              ...(message.voice ?? {}),
+              ...(serverMessage.voice ?? {}),
+              local_url: serverMessage.voice.file_id
+                ? undefined
+                : message.voice?.local_url,
+              segments: nextSegments,
+            },
+          };
+        }),
+      );
+
+      completedMessageIds.forEach((messageId) => {
+        autoPlayEligibleAssistantIdsRef.current.delete(messageId);
+      });
+      readyToAutoPlayIds.forEach((messageId) => {
+        markAssistantVoiceAutoPlay(messageId);
+      });
     },
-    [playLiveTtsQueue],
+    [markAssistantVoiceAutoPlay, setDerivedMessages],
+  );
+
+  const pollConversationForAssistantVoice = useCallback(
+    async (targetConversationId: string) => {
+      if (!targetConversationId || ttsPollingInFlightRef.current) {
+        return;
+      }
+
+      ttsPollingInFlightRef.current = true;
+      try {
+        const conversation = await fetchConversationManually(targetConversationId);
+        if (conversation?.id !== targetConversationId) {
+          return;
+        }
+        mergeAssistantVoiceFromConversation(conversation.message ?? []);
+      } catch {
+        // Ignore transient polling failures and retry on the next cycle.
+      } finally {
+        ttsPollingInFlightRef.current = false;
+      }
+    },
+    [fetchConversationManually, mergeAssistantVoiceFromConversation],
   );
 
   const handleVoiceStreamEvent = useCallback(
@@ -477,18 +453,14 @@ export const useSendMessage = (controller: AbortController) => {
           conversationId: targetConversationId,
         } as IMessage;
         appendMessageIfMissing(message);
-        if (message.input_mode === 'voice') {
-          liveReplyStateRef.current.set(message.id, {
-            rawContent: message.content ?? '',
-            renderedText: normalizeLiveTtsText(message.content ?? ''),
-            pendingBuffer: '',
-          });
+        setLoadingAssistantId(message.id);
+        if (message.voice?.status === 'streaming') {
+          addAutoPlayEligibleAssistant(message.id);
         }
         return;
       }
 
       if (type === 'assistant_delta') {
-        let nextContent = '';
         upsertMessage(data.message_id, MessageType.Assistant, (previous) => ({
           ...(previous ?? {
             id: data.message_id,
@@ -498,52 +470,8 @@ export const useSendMessage = (controller: AbortController) => {
           }),
           role: MessageType.Assistant,
           conversationId: targetConversationId,
-          content: (() => {
-            nextContent = `${previous?.content ?? ''}${data.delta ?? ''}`;
-            return nextContent;
-          })(),
+          content: `${previous?.content ?? ''}${data.delta ?? ''}`,
         }));
-        if (liveReplyStateRef.current.has(data.message_id)) {
-          enqueueLiveTtsText(data.message_id, nextContent, false);
-        }
-        return;
-      }
-
-      if (type === 'assistant_audio_segment') {
-        upsertMessage(data.message_id, MessageType.Assistant, (previous) => {
-          const existingSegments = previous?.voice?.segments ?? [];
-          const nextSegments = existingSegments.some(
-            (segment) => segment.seq === data.seq,
-          )
-            ? existingSegments
-            : sortVoiceSegments([
-                ...existingSegments,
-                {
-                  seq: data.seq,
-                  file_id: data.file_id || '',
-                  mime_type: data.mime_type || 'audio/mpeg',
-                  duration_ms: 0,
-                  text: data.text,
-                },
-              ]);
-
-          return {
-            ...(previous ?? {
-              id: data.message_id,
-              role: MessageType.Assistant,
-              content: '',
-              conversationId: targetConversationId,
-            }),
-            role: MessageType.Assistant,
-            conversationId: targetConversationId,
-            voice: {
-              kind: 'segments',
-              status: 'streaming',
-              mime_type: data.mime_type || 'audio/mpeg',
-              segments: nextSegments,
-            },
-          } as IMessage;
-        });
         return;
       }
 
@@ -579,9 +507,20 @@ export const useSendMessage = (controller: AbortController) => {
             : undefined,
           reference: data.reference,
         }));
-        if (liveReplyStateRef.current.has(message.id)) {
-          enqueueLiveTtsText(message.id, message.content ?? '', true);
+        if (
+          autoPlayEligibleAssistantIdsRef.current.has(message.id) &&
+          message.voice?.status === 'ready' &&
+          message.voice.kind === 'single' &&
+          message.voice.file_id
+        ) {
+          removeAutoPlayEligibleAssistant(message.id);
+          markAssistantVoiceAutoPlay(message.id);
+        } else if (message.voice?.status && message.voice.status !== 'streaming') {
+          removeAutoPlayEligibleAssistant(message.id);
         }
+        setLoadingAssistantId((previous) =>
+          previous === message.id ? '' : previous,
+        );
         return;
       }
 
@@ -600,7 +539,10 @@ export const useSendMessage = (controller: AbortController) => {
         }
 
         if (stage === 'llm' && data.message_id) {
-          liveReplyStateRef.current.delete(data.message_id);
+          removeAutoPlayEligibleAssistant(data.message_id);
+          setLoadingAssistantId((previous) =>
+            previous === data.message_id ? '' : previous,
+          );
           upsertMessage(data.message_id, MessageType.Assistant, (previous) => {
             const message = data.message as IMessage | undefined;
             const nextVoice = message?.voice
@@ -644,7 +586,13 @@ export const useSendMessage = (controller: AbortController) => {
         }
       }
     },
-    [appendMessageIfMissing, enqueueLiveTtsText, upsertMessage],
+    [
+      addAutoPlayEligibleAssistant,
+      appendMessageIfMissing,
+      markAssistantVoiceAutoPlay,
+      removeAutoPlayEligibleAssistant,
+      upsertMessage,
+    ],
   );
 
   const streamVoiceRequest = useCallback(
@@ -668,7 +616,7 @@ export const useSendMessage = (controller: AbortController) => {
             ...(isJson ? { 'Content-Type': 'application/json' } : {}),
           },
           body,
-          signal: controller.signal,
+          signal: controllerRef.current.signal,
         });
 
         if (!response.ok) {
@@ -706,7 +654,7 @@ export const useSendMessage = (controller: AbortController) => {
         setVoiceLoading(false);
       }
     },
-    [controller, handleVoiceStreamEvent],
+    [controllerRef, handleVoiceStreamEvent],
   );
 
   const handlePressEnter = useCallback(async () => {
@@ -728,7 +676,11 @@ export const useSendMessage = (controller: AbortController) => {
       id,
       role: MessageType.User,
       conversationId: targetConversationId,
-    });
+    }, '', assistantVoicePlaceholder);
+    setLoadingAssistantId(id);
+    if (currentDialog?.prompt_config?.tts) {
+      addAutoPlayEligibleAssistant(id);
+    }
 
     if (done) {
       setValue('');
@@ -747,11 +699,14 @@ export const useSendMessage = (controller: AbortController) => {
     clearFiles();
   }, [
     value,
+    addAutoPlayEligibleAssistant,
     createConversationBeforeSendMessage,
     addNewestQuestion,
+    assistantVoicePlaceholder,
     files,
     done,
     clearFiles,
+    currentDialog?.prompt_config?.tts,
     setValue,
     sendMessage,
   ]);
@@ -850,35 +805,81 @@ export const useSendMessage = (controller: AbortController) => {
     [conversationId, streamVoiceRequest, upsertMessage],
   );
 
+  const hasPendingAssistantVoice = useMemo(
+    () =>
+      derivedMessages.some(
+        (message) =>
+          message.conversationId === conversationId &&
+          message.role === MessageType.Assistant &&
+          message.voice?.status === 'streaming',
+      ),
+    [conversationId, derivedMessages],
+  );
+
   useEffect(() => {
-    const audio = new Audio();
-    const replyState = liveReplyStateRef.current;
-    audio.preload = 'none';
-    liveTtsAudioRef.current = audio;
+    derivedMessagesRef.current = derivedMessages;
+  }, [derivedMessages]);
+
+  useEffect(() => {
+    const previousConversationId = previousConversationIdRef.current;
+    const switchedConversation =
+      Boolean(previousConversationId) && previousConversationId !== conversationId;
+    const clearedConversation = previousConversationId !== conversationId && !conversationId;
+
+    if (switchedConversation || clearedConversation) {
+      autoPlayEligibleAssistantIdsRef.current.clear();
+      stopAssistantTtsPolling();
+      setLoadingAssistantId('');
+    }
+
+    previousConversationIdRef.current = conversationId;
+  }, [conversationId, stopAssistantTtsPolling]);
+
+  useEffect(() => {
+    stopAssistantTtsPolling();
+    if (!conversationId || !hasPendingAssistantVoice) {
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      await pollConversationForAssistantVoice(conversationId);
+      if (cancelled) {
+        return;
+      }
+      ttsPollingTimerRef.current = window.setTimeout(() => {
+        void poll();
+      }, 1500);
+    };
+
+    void poll();
 
     return () => {
-      liveTtsAudioRef.current?.pause();
-      if (liveTtsAudioRef.current) {
-        liveTtsAudioRef.current.removeAttribute('src');
-        liveTtsAudioRef.current.load();
-      }
-      liveTtsAudioRef.current = null;
-      liveTtsQueueRef.current = [];
-      replyState.clear();
-      liveTtsPlayingRef.current = false;
-      liveTtsBlockedRef.current = false;
-      revokeLiveTtsUrls();
+      cancelled = true;
+      stopAssistantTtsPolling();
     };
-  }, [revokeLiveTtsUrls]);
+  }, [
+    conversationId,
+    hasPendingAssistantVoice,
+    pollConversationForAssistantVoice,
+    stopAssistantTtsPolling,
+  ]);
 
   useEffect(() => {
+    const isFinalAnswer = Boolean(answer.final);
+    if (answer.id && isFinalAnswer) {
+      setLoadingAssistantId((previous) =>
+        previous === answer.id ? '' : previous,
+      );
+    }
+
     //  #1289
     if (answer.id && answer.audio_binary) {
       markAssistantVoiceAutoPlay(answer.id);
     }
 
     if (
-      (answer.answer || answer.audio_binary) &&
+      (answer.answer || answer.audio_binary || answer.voice) &&
       conversationId &&
       isNew !== 'true'
     ) {
@@ -892,6 +893,14 @@ export const useSendMessage = (controller: AbortController) => {
     markAssistantVoiceAutoPlay,
   ]);
 
+  useEffect(() => {
+    const eligibleAssistantIds = autoPlayEligibleAssistantIdsRef.current;
+    return () => {
+      eligibleAssistantIds.clear();
+      stopAssistantTtsPolling();
+    };
+  }, [stopAssistantTtsPolling]);
+
   return {
     assistantVoiceAutoPlayNonceMap,
     consumeAssistantVoiceAutoPlay,
@@ -903,6 +912,7 @@ export const useSendMessage = (controller: AbortController) => {
     regenerateMessage,
     retryVoiceMessage,
     sendLoading: !done || voiceLoading,
+    loadingAssistantId,
     scrollRef,
     messageContainerRef,
     derivedMessages,

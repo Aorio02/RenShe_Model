@@ -1,12 +1,13 @@
 import copy
 import logging
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
 from api.db.services.conversation_service import ConversationService
-from api.db.services.dialog_service import async_chat, clean_tts_text
-from api.db.services.dialog_service import DialogService
+from api.db.services.dialog_service import DialogService, async_chat, clean_tts_text
 from api.db.services.external_asr_service import ExternalASRService
 from api.db.services.voice_storage_service import VoiceStorageService
 from api.db.services.llm_service import LLMBundle
@@ -152,23 +153,317 @@ def _normalize_audio_mime_type(mime_type: str | None, default: str = DEFAULT_TTS
     return mime_type.split(";", 1)[0].strip().lower() or default
 
 
-def _tts_bytes(tts_mdl, text: str) -> tuple[bytes | None, str]:
-    if not tts_mdl:
-        return None, DEFAULT_TTS_MIME_TYPE
-    text = clean_tts_text(text)
-    if not text:
-        return None, DEFAULT_TTS_MIME_TYPE
-    audio = b""
-    for chunk in tts_mdl.tts(text):
-        audio += chunk
-    mime_type = _normalize_audio_mime_type(
-        getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", None),
+def _build_single_voice_state(
+    previous_voice: dict[str, Any] | None,
+    *,
+    status: str,
+    mime_type: str | None = None,
+    file_id: str | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    voice = copy.deepcopy(previous_voice or {})
+    voice["kind"] = "single"
+    voice["status"] = status
+    voice["mime_type"] = _normalize_audio_mime_type(
+        mime_type or voice.get("mime_type"),
         default=DEFAULT_TTS_MIME_TYPE,
     )
-    return audio or None, mime_type
+    voice.pop("segments", None)
+
+    if file_id:
+        voice["file_id"] = file_id
+    else:
+        voice.pop("file_id", None)
+
+    if error:
+        voice["error"] = error
+    else:
+        voice.pop("error", None)
+
+    return voice
 
 
 class VoiceChatService:
+    _assistant_tts_executor = ThreadPoolExecutor(
+        max_workers=2,
+        thread_name_prefix="assistant-tts",
+    )
+    _assistant_tts_tasks: dict[str, Future] = {}
+    _assistant_tts_tasks_lock = threading.Lock()
+
+    @staticmethod
+    def _assistant_tts_task_key(conversation_id: str, message_id: str) -> str:
+        return f"{conversation_id}:{message_id}"
+
+    @classmethod
+    def _set_assistant_voice(
+        cls,
+        conv,
+        idx: int,
+        *,
+        status: str,
+        mime_type: str | None = None,
+        file_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        message = conv.message[idx]
+        message["voice"] = _build_single_voice_state(
+            message.get("voice"),
+            status=status,
+            mime_type=mime_type,
+            file_id=file_id,
+            error=error,
+        )
+        message["created_at"] = _now_ts()
+        conv.message[idx] = message
+
+    @classmethod
+    def prepare_assistant_tts_message(
+        cls,
+        conv,
+        message_id: str,
+        text: str | None = None,
+    ) -> str:
+        idx = _message_index_by_id_and_role(conv, message_id, "assistant")
+        if idx < 0:
+            raise LookupError("Assistant message not found!")
+
+        cleaned_text = clean_tts_text(
+            text if text is not None else (conv.message[idx].get("content") or "")
+        )
+        if cleaned_text:
+            cls._set_assistant_voice(
+                conv,
+                idx,
+                status="streaming",
+            )
+            return cleaned_text
+
+        cls._set_assistant_voice(
+            conv,
+            idx,
+            status="failed",
+            error="no_readable_content",
+        )
+        return ""
+
+    @classmethod
+    def enqueue_assistant_tts_task(
+        cls,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+    ) -> bool:
+        if not conversation_id or not message_id:
+            return False
+
+        task_key = cls._assistant_tts_task_key(conversation_id, message_id)
+        with cls._assistant_tts_tasks_lock:
+            existing_task = cls._assistant_tts_tasks.get(task_key)
+            if existing_task and not existing_task.done():
+                return False
+            cls._assistant_tts_tasks[task_key] = cls._assistant_tts_executor.submit(
+                cls._run_assistant_tts_task,
+                user_id,
+                conversation_id,
+                message_id,
+            )
+        return True
+
+    @classmethod
+    def _clear_assistant_tts_task(cls, conversation_id: str, message_id: str) -> None:
+        task_key = cls._assistant_tts_task_key(conversation_id, message_id)
+        with cls._assistant_tts_tasks_lock:
+            cls._assistant_tts_tasks.pop(task_key, None)
+
+    @classmethod
+    def _persist_assistant_tts_failure(
+        cls,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        error: str,
+        mime_type: str | None = None,
+    ) -> None:
+        try:
+            conv = cls._load_conversation(conversation_id, user_id)
+            idx = _message_index_by_id_and_role(conv, message_id, "assistant")
+            if idx < 0:
+                return
+            cls._set_assistant_voice(
+                conv,
+                idx,
+                status="failed",
+                mime_type=mime_type,
+                error=error,
+            )
+            _persist_conversation(conv)
+        except Exception:
+            logging.exception(
+                "persist assistant tts failure state failed for %s/%s",
+                conversation_id,
+                message_id,
+            )
+
+    @classmethod
+    def _run_assistant_tts_task(
+        cls,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+    ) -> None:
+        try:
+            conv = cls._load_conversation(conversation_id, user_id)
+            idx = _message_index_by_id_and_role(conv, message_id, "assistant")
+            if idx < 0:
+                return
+
+            dialog = cls._load_dialog(conv)
+            if not dialog.prompt_config.get("tts"):
+                cls._persist_assistant_tts_failure(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    error="tts_disabled",
+                )
+                return
+
+            text = clean_tts_text(conv.message[idx].get("content") or "")
+            if not text:
+                cls._persist_assistant_tts_failure(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    error="no_readable_content",
+                )
+                return
+
+            tts_mdl = cls._try_build_tts_model(dialog)
+            if not tts_mdl:
+                cls._persist_assistant_tts_failure(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    error="tts_unavailable",
+                )
+                return
+
+            mime_type = _normalize_audio_mime_type(
+                getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", None),
+            )
+            audio = bytearray()
+            for chunk in tts_mdl.tts(text):
+                if isinstance(chunk, (bytes, bytearray)) and chunk:
+                    audio.extend(chunk)
+
+            if not audio:
+                cls._persist_assistant_tts_failure(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    error="tts_empty",
+                    mime_type=mime_type,
+                )
+                return
+
+            file_id = VoiceStorageService.build_assistant_final_key(
+                conv.id,
+                message_id,
+                mime_type,
+            )
+            VoiceStorageService.save_blob(conv.user_id or user_id, file_id, bytes(audio))
+
+            conv = cls._load_conversation(conversation_id, user_id)
+            idx = _message_index_by_id_and_role(conv, message_id, "assistant")
+            if idx < 0:
+                return
+            cls._set_assistant_voice(
+                conv,
+                idx,
+                status="ready",
+                mime_type=mime_type,
+                file_id=file_id,
+            )
+            _persist_conversation(conv)
+        except Exception:
+            logging.exception(
+                "assistant async tts failed for %s/%s",
+                conversation_id,
+                message_id,
+            )
+            cls._persist_assistant_tts_failure(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                error="tts_failed",
+            )
+        finally:
+            cls._clear_assistant_tts_task(conversation_id, message_id)
+
+    @classmethod
+    def persist_assistant_tts_segment(
+        cls,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        seq: int,
+        text: str,
+        audio: bytes,
+        mime_type: str,
+        final: bool = False,
+    ) -> None:
+        if not audio:
+            return
+
+        conv = cls._load_conversation(conversation_id, user_id)
+        idx = _message_index_by_id_and_role(conv, message_id, "assistant")
+        if idx < 0:
+            raise LookupError("Assistant message not found!")
+
+        owner_id = conv.user_id or user_id
+        normalized_mime_type = _normalize_audio_mime_type(
+            mime_type,
+            default=DEFAULT_TTS_MIME_TYPE,
+        )
+        file_id = VoiceStorageService.build_assistant_segment_key(
+            conv.id,
+            message_id,
+            seq,
+            normalized_mime_type,
+        )
+        VoiceStorageService.save_blob(owner_id, file_id, audio)
+
+        message = conv.message[idx]
+        voice = message.setdefault("voice", {})
+        segments = [
+            segment
+            for segment in (voice.get("segments") or [])
+            if int(segment.get("seq", -1)) != int(seq)
+        ]
+        segments.append(
+            {
+                "seq": int(seq),
+                "file_id": file_id,
+                "mime_type": normalized_mime_type,
+                "duration_ms": 0,
+                "text": text,
+            }
+        )
+        segments.sort(key=lambda item: int(item.get("seq", 0)))
+
+        voice["kind"] = "segments"
+        voice["status"] = "ready" if final else "partial"
+        voice["mime_type"] = normalized_mime_type
+        voice["segments"] = segments
+        voice.pop("file_id", None)
+        voice.pop("error", None)
+        message["voice"] = voice
+        message["created_at"] = _now_ts()
+        conv.message[idx] = message
+        _persist_conversation(conv)
+
     @staticmethod
     def _load_conversation(conversation_id: str, user_id: str):
         ok, conv = ConversationService.get_by_id(conversation_id)
@@ -248,10 +543,11 @@ class VoiceChatService:
         cls,
         conv,
         dialog,
+        user_id: str,
     ) -> AsyncGenerator[dict[str, Any], None]:
-        tts_mdl = cls._try_build_tts_model(dialog)
+        tts_enabled = bool(dialog.prompt_config.get("tts"))
         chat_messages = _conversation_messages_for_chat(conv.message)
-        assistant_message = cls._append_assistant_placeholder(conv, with_voice=bool(tts_mdl))
+        assistant_message = cls._append_assistant_placeholder(conv, with_voice=tts_enabled)
         yield _stream_event("assistant_started", {"message": _clone_message(assistant_message)})
 
         assistant_idx = len(conv.message) - 1
@@ -280,51 +576,25 @@ class VoiceChatService:
                     },
                 )
 
-            if tts_mdl:
-                voice_meta = conv.message[assistant_idx].setdefault("voice", {})
-                try:
-                    final_audio, final_mime_type = _tts_bytes(
-                        tts_mdl,
-                        conv.message[assistant_idx].get("content", ""),
-                    )
-                    if final_audio:
-                        final_file_id = VoiceStorageService.build_assistant_final_key(
-                            conv.id,
-                            assistant_message["id"],
-                            final_mime_type,
-                        )
-                        VoiceStorageService.save_blob(
-                            conv.user_id,
-                            final_file_id,
-                            final_audio,
-                        )
-                        voice_meta["kind"] = "single"
-                        voice_meta["status"] = "ready"
-                        voice_meta["file_id"] = final_file_id
-                        voice_meta["mime_type"] = final_mime_type
-                        voice_meta.pop("error", None)
-                    else:
-                        voice_meta["kind"] = "single"
-                        voice_meta["status"] = "failed"
-                        voice_meta["mime_type"] = DEFAULT_TTS_MIME_TYPE
-                        voice_meta["error"] = "tts_empty"
-                        voice_meta.pop("file_id", None)
-                except Exception as exc:
-                    logging.warning("assistant final full tts failed: %s", exc)
-                    voice_meta["kind"] = "single"
-                    voice_meta["status"] = "failed"
-                    voice_meta["mime_type"] = _normalize_audio_mime_type(
-                        voice_meta.get("mime_type"),
-                        default=DEFAULT_TTS_MIME_TYPE,
-                    )
-                    voice_meta["error"] = "tts_failed"
-                    voice_meta.pop("file_id", None)
-
             conv.message[assistant_idx]["id"] = assistant_message["id"]
             conv.message[assistant_idx]["role"] = "assistant"
             conv.message[assistant_idx]["created_at"] = _now_ts()
             conv.reference[-1] = reference
+            should_enqueue_tts = False
+            if tts_enabled:
+                cleaned_text = cls.prepare_assistant_tts_message(
+                    conv,
+                    assistant_message["id"],
+                    conv.message[assistant_idx].get("content") or "",
+                )
+                should_enqueue_tts = bool(cleaned_text)
             _persist_conversation(conv)
+            if should_enqueue_tts:
+                cls.enqueue_assistant_tts_task(
+                    user_id=user_id,
+                    conversation_id=conv.id,
+                    message_id=assistant_message["id"],
+                )
 
             final_message = copy.deepcopy(conv.message[assistant_idx])
             final_message["reference"] = reference
@@ -337,13 +607,13 @@ class VoiceChatService:
             )
         except Exception as exc:
             logging.exception(exc)
-            if tts_mdl:
-                voice_meta = conv.message[assistant_idx].get("voice") or {}
-                voice_meta["kind"] = "single"
-                voice_meta["status"] = "failed"
-                voice_meta["error"] = "llm_failed"
-                voice_meta.pop("file_id", None)
-                conv.message[assistant_idx]["voice"] = voice_meta
+            if tts_enabled:
+                cls._set_assistant_voice(
+                    conv,
+                    assistant_idx,
+                    status="failed",
+                    error="llm_failed",
+                )
             conv.message[assistant_idx]["id"] = assistant_message["id"]
             conv.message[assistant_idx]["role"] = "assistant"
             conv.message[assistant_idx]["content"] = conv.message[assistant_idx]["content"] or f"**ERROR**: {exc}"
@@ -441,7 +711,7 @@ class VoiceChatService:
             yield _stream_event("done", True)
             return
 
-        async for event in cls._stream_assistant_reply(conv, dialog):
+        async for event in cls._stream_assistant_reply(conv, dialog, user_id):
             yield event
 
         yield _stream_event("done", True)
@@ -502,7 +772,7 @@ class VoiceChatService:
             yield _stream_event("done", True)
             return
 
-        async for event in cls._stream_assistant_reply(conv, dialog):
+        async for event in cls._stream_assistant_reply(conv, dialog, user_id):
             yield event
 
         yield _stream_event("done", True)

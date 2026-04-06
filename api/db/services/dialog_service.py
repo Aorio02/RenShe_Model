@@ -345,7 +345,8 @@ def _split_tts_buffer(buffer: str, last_flush_at: float, force: bool = False) ->
 
 
 async def async_chat(dialog, messages, stream=True, **kwargs):
-    enable_tts = kwargs.pop("enable_tts", True)
+    live_tts = kwargs.pop("live_tts", False)
+    enable_tts = kwargs.pop("enable_tts", True) and not live_tts
     assert messages[-1]["role"] == "user", "The last content of this conversation is not from user."
     if not dialog.kb_ids and not dialog.prompt_config.get("tavily_api_key"):
         async for ans in async_chat_solo(dialog, messages, stream, enable_tts=enable_tts):

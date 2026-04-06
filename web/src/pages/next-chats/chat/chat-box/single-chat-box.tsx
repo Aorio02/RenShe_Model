@@ -10,7 +10,7 @@ import {
 import { useFetchUserInfo } from '@/hooks/use-user-setting-request';
 import { IClientConversation } from '@/interfaces/database/chat';
 import { buildMessageUuidWithRole } from '@/utils/chat';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import {
   useGetSendButtonDisabled,
   useSendButtonDisabled,
@@ -20,13 +20,13 @@ import { useSendMessage } from '../../hooks/use-send-chat-message';
 import { buildMessageItemReference } from '../../utils';
 
 interface IProps {
-  controller: AbortController;
+  controllerRef: MutableRefObject<AbortController>;
   stopOutputMessage(): void;
   conversation: IClientConversation;
 }
 
 export function SingleChatBox({
-  controller,
+  controllerRef,
   stopOutputMessage,
   conversation,
 }: IProps) {
@@ -37,6 +37,7 @@ export function SingleChatBox({
     scrollRef,
     messageContainerRef,
     sendLoading,
+    loadingAssistantId,
     derivedMessages,
     isUploading,
     handleInputChange,
@@ -48,7 +49,7 @@ export function SingleChatBox({
     handleUploadFile,
     removeFile,
     setDerivedMessages,
-  } = useSendMessage(controller);
+  } = useSendMessage(controllerRef);
   const { data: userInfo } = useFetchUserInfo();
   const { data: currentDialog } = useFetchDialog();
   const { createConversationBeforeUploadDocument } =
@@ -96,7 +97,7 @@ export function SingleChatBox({
                 loading={
                   message.role === MessageType.Assistant &&
                   sendLoading &&
-                  derivedMessages.length - 1 === i
+                  message.id === loadingAssistantId
                 }
                 key={buildMessageUuidWithRole(message)}
                 item={message}

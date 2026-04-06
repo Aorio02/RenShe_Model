@@ -19,6 +19,7 @@ import re
 import logging
 from copy import deepcopy
 import tempfile
+from peewee import IntegrityError
 from quart import Response, request
 from api.apps import current_user, login_required
 from api.db.db_models import APIToken
@@ -33,6 +34,125 @@ from api.utils.api_utils import get_data_error_result, get_json_result, get_requ
 from rag.prompts.template import load_prompt
 from rag.prompts.generator import chunks_format
 from common.constants import RetCode, LLMType
+
+
+_CONVERSATION_RESPONSE_MESSAGE_DROP_FIELDS = {
+    "answer",
+    "audio_binary",
+    "audio_mime_type",
+    "final",
+    "prompt",
+    "reference",
+    "session_id",
+}
+_CONVERSATION_STORAGE_MESSAGE_DROP_FIELDS = _CONVERSATION_RESPONSE_MESSAGE_DROP_FIELDS | {
+    "chatBoxId",
+    "conversationId",
+    "data",
+}
+
+
+def _merge_latest_voice_state(conv):
+    if not conv or not getattr(conv, "id", None):
+        return conv
+
+    ok, latest_conv = ConversationService.get_by_id(conv.id)
+    if not ok or not latest_conv:
+        return conv
+
+    latest_messages = latest_conv.message or []
+    latest_voice_map = {}
+    for message in latest_messages:
+        key = (message.get("id"), message.get("role"))
+        if key[0] and message.get("voice") is not None:
+            latest_voice_map[key] = deepcopy(message.get("voice"))
+
+    if not latest_voice_map:
+        return conv
+
+    for message in conv.message or []:
+        key = (message.get("id"), message.get("role"))
+        latest_voice = latest_voice_map.get(key)
+        if latest_voice is None:
+            continue
+        if message.get("voice"):
+            current_voice = message.get("voice") or {}
+            merged_voice = deepcopy(latest_voice)
+            merged_voice.update(current_voice)
+            if current_voice.get("segments"):
+                merged_voice["segments"] = current_voice["segments"]
+            message["voice"] = merged_voice
+        else:
+            message["voice"] = deepcopy(latest_voice)
+
+    return conv
+
+
+def _finalize_live_tts_segments(conv, message_id):
+    if not conv or not message_id:
+        return conv
+
+    for message in reversed(conv.message or []):
+        if message.get("id") != message_id or message.get("role") != "assistant":
+            continue
+
+        voice = message.get("voice") or {}
+        if voice.get("kind") != "segments":
+            return conv
+
+        segments = voice.get("segments") or []
+        if not segments:
+            return conv
+
+        if voice.get("status") in {"partial", "streaming"}:
+            voice["status"] = "ready"
+            message["voice"] = voice
+        return conv
+
+    return conv
+
+
+def _sanitize_voice_payload(voice):
+    if not isinstance(voice, dict):
+        return voice
+
+    next_voice = deepcopy(voice)
+    next_voice.pop("local_url", None)
+
+    segments = next_voice.get("segments")
+    if isinstance(segments, list):
+        cleaned_segments = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                cleaned_segments.append(segment)
+                continue
+            next_segment = deepcopy(segment)
+            next_segment.pop("object_url", None)
+            cleaned_segments.append(next_segment)
+        next_voice["segments"] = cleaned_segments
+
+    return next_voice
+
+
+def _sanitize_conversation_message(message, drop_fields):
+    if not isinstance(message, dict):
+        return message
+
+    next_message = deepcopy(message)
+    for field in drop_fields:
+        next_message.pop(field, None)
+
+    if "voice" in next_message:
+        next_message["voice"] = _sanitize_voice_payload(next_message.get("voice"))
+
+    return next_message
+
+
+def _sanitize_conversation_messages(messages, drop_fields):
+    return [
+        _sanitize_conversation_message(message, drop_fields)
+        for message in (messages or [])
+    ]
 
 
 @manager.route("/set", methods=["POST"])  # noqa: F821
@@ -65,6 +185,15 @@ async def set_conversation():
         e, dia = DialogService.get_by_id(req["dialog_id"])
         if not e:
             return get_data_error_result(message="Dialog not found")
+        existing, existing_conv = ConversationService.get_by_id(conv_id)
+        if existing and existing_conv:
+            if str(existing_conv.user_id) != str(current_user.id):
+                return get_json_result(
+                    data=False,
+                    message="Only owner of conversation authorized for this operation.",
+                    code=RetCode.OPERATING_ERROR,
+                )
+            return get_json_result(data=existing_conv.to_dict())
         conv = {
             "id": conv_id,
             "dialog_id": req["dialog_id"],
@@ -75,6 +204,11 @@ async def set_conversation():
         }
         ConversationService.save(**conv)
         return get_json_result(data=conv)
+    except IntegrityError:
+        existing, existing_conv = ConversationService.get_by_id(conv_id)
+        if existing and existing_conv and str(existing_conv.user_id) == str(current_user.id):
+            return get_json_result(data=existing_conv.to_dict())
+        return get_data_error_result(message="Conversation already exists!")
     except Exception as e:
         return server_error_response(e)
 
@@ -102,6 +236,10 @@ async def get():
             ref["chunks"] = chunks_format(ref)
 
         conv = conv.to_dict()
+        conv["message"] = _sanitize_conversation_messages(
+            conv.get("message"),
+            _CONVERSATION_RESPONSE_MESSAGE_DROP_FIELDS,
+        )
         conv["avatar"] = avatar
         return get_json_result(data=conv)
     except Exception as e:
@@ -158,9 +296,23 @@ async def list_conversation():
     try:
         if not DialogService.query(tenant_id=current_user.id, id=dialog_id):
             return get_json_result(data=False, message="Only owner of dialog authorized for this operation.", code=RetCode.OPERATING_ERROR)
-        convs = ConversationService.query(dialog_id=dialog_id, order_by=ConversationService.model.create_time, reverse=True)
+        model = ConversationService.model
+        convs = (
+            model.select(
+                model.id,
+                model.dialog_id,
+                model.name,
+                model.user_id,
+                model.create_time,
+                model.create_date,
+                model.update_time,
+                model.update_date,
+            )
+            .where(model.dialog_id == dialog_id)
+            .order_by(model.create_time.desc())
+        )
 
-        convs = [d.to_dict() for d in convs]
+        convs = list(convs.dicts())
         return get_json_result(data=convs)
     except Exception as e:
         return server_error_response(e)
@@ -171,8 +323,12 @@ async def list_conversation():
 @validate_request("conversation_id", "messages")
 async def completion():
     req = await get_request_json()
+    request_messages = _sanitize_conversation_messages(
+        req["messages"],
+        _CONVERSATION_STORAGE_MESSAGE_DROP_FIELDS,
+    )
     msg = []
-    for m in req["messages"]:
+    for m in request_messages:
         if m["role"] == "system":
             continue
         if m["role"] == "assistant" and not msg:
@@ -180,6 +336,7 @@ async def completion():
         msg.append(m)
     message_id = msg[-1].get("id")
     chat_model_id = req.get("llm_id", "")
+    defer_tts = bool(req.get("live_tts"))
     req.pop("llm_id", None)
 
     chat_model_config = {}
@@ -198,7 +355,7 @@ async def completion():
         e, conv = ConversationService.get_by_id(req["conversation_id"])
         if not e:
             return get_data_error_result(message="Conversation not found!")
-        conv.message = deepcopy(req["messages"])
+        conv.message = deepcopy(request_messages)
         e, dia = DialogService.get_by_id(conv.dialog_id)
         if not e:
             return get_data_error_result(message="Dialog not found!")
@@ -219,6 +376,7 @@ async def completion():
             dia.llm_setting = chat_model_config
 
         is_embedded = bool(chat_model_id)
+        user_id = current_user.id
         async def stream():
             nonlocal dia, msg, req, conv
             try:
@@ -226,7 +384,23 @@ async def completion():
                     ans = structure_answer(conv, ans, message_id, conv.id)
                     yield "data:" + json.dumps({"code": 0, "message": "", "data": ans}, ensure_ascii=False) + "\n\n"
                 if not is_embedded:
+                    _merge_latest_voice_state(conv)
+                    _finalize_live_tts_segments(conv, message_id)
+                    should_enqueue_tts = False
+                    if defer_tts and dia.prompt_config.get("tts") and message_id:
+                        try:
+                            should_enqueue_tts = bool(
+                                VoiceChatService.prepare_assistant_tts_message(conv, message_id)
+                            )
+                        except Exception as e:
+                            logging.warning("Prepare assistant async TTS failed: %s", e)
                     ConversationService.update_by_id(conv.id, conv.to_dict())
+                    if should_enqueue_tts:
+                        VoiceChatService.enqueue_assistant_tts_task(
+                            user_id=user_id,
+                            conversation_id=conv.id,
+                            message_id=message_id,
+                        )
             except Exception as e:
                 logging.exception(e)
                 yield "data:" + json.dumps({"code": 500, "message": str(e), "data": {"answer": "**ERROR**: " + str(e), "reference": []}}, ensure_ascii=False) + "\n\n"
@@ -245,7 +419,21 @@ async def completion():
             async for ans in async_chat(dia, msg, **req):
                 answer = structure_answer(conv, ans, message_id, conv.id)
                 if not is_embedded:
+                    should_enqueue_tts = False
+                    if defer_tts and dia.prompt_config.get("tts") and message_id:
+                        try:
+                            should_enqueue_tts = bool(
+                                VoiceChatService.prepare_assistant_tts_message(conv, message_id)
+                            )
+                        except Exception as e:
+                            logging.warning("Prepare assistant async TTS failed: %s", e)
                     ConversationService.update_by_id(conv.id, conv.to_dict())
+                    if should_enqueue_tts:
+                        VoiceChatService.enqueue_assistant_tts_task(
+                            user_id=user_id,
+                            conversation_id=conv.id,
+                            message_id=message_id,
+                        )
                 break
             return get_json_result(data=answer)
     except Exception as e:
@@ -314,9 +502,21 @@ async def sequence2txt():
 @login_required
 async def tts():
     req = await get_request_json()
+    user_id = current_user.id
     text = clean_tts_text(req["text"])
     if not text:
         return get_data_error_result(message="No readable Chinese content found for TTS")
+    conversation_id = (req.get("conversation_id") or "").strip()
+    message_id = (req.get("message_id") or "").strip()
+    seq_raw = req.get("seq")
+    final_segment = bool(req.get("final"))
+    persist_segment = bool(conversation_id and message_id and seq_raw is not None)
+    seq = None
+    if persist_segment:
+        try:
+            seq = int(seq_raw)
+        except Exception:
+            persist_segment = False
 
     tenants = TenantService.get_info_by(current_user.id)
     if not tenants:
@@ -328,23 +528,32 @@ async def tts():
 
     tts_mdl = LLMBundle(tenants[0]["tenant_id"], LLMType.TTS, tts_id)
 
-    def audio_iter():
-        for chunk in tts_mdl.tts(text):
-            yield chunk
-
-    try:
-        chunk_iterator = audio_iter()
-        first_chunk = next(chunk_iterator, None)
-        mime_type = getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", "audio/mpeg")
-        mime_type = (mime_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
-    except Exception as e:
-        return server_error_response(e)
+    mime_type = getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", "audio/mpeg")
+    mime_type = (mime_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
 
     def stream_audio():
-        if first_chunk is not None:
-            yield first_chunk
-        for chunk in chunk_iterator:
+        completed = False
+        audio = bytearray()
+        for chunk in tts_mdl.tts(text):
+            if persist_segment and isinstance(chunk, (bytes, bytearray)):
+                audio.extend(chunk)
             yield chunk
+        completed = True
+
+        if persist_segment and completed and audio:
+            try:
+                VoiceChatService.persist_assistant_tts_segment(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    seq=seq,
+                    text=text,
+                    audio=bytes(audio),
+                    mime_type=mime_type,
+                    final=final_segment,
+                )
+            except Exception as e:
+                logging.warning("Persist live TTS segment failed: %s", e)
 
     resp = Response(stream_audio(), mimetype=mime_type)
     resp.headers.add_header("Cache-Control", "no-cache")

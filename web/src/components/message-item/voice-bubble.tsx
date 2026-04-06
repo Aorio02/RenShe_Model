@@ -4,7 +4,6 @@ import { cn } from '@/lib/utils';
 import api from '@/utils/api';
 import { getAuthorization } from '@/utils/authorization-util';
 import { Pause, Play, RotateCcw } from 'lucide-react';
-import { SpeechPlayer } from 'openai-speech-stream-player';
 import { toast } from 'sonner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -14,7 +13,6 @@ interface VoiceBubbleProps {
   conversationId?: string;
   messageId: string;
   role: 'user' | 'assistant';
-  displayText?: string;
   loading?: boolean;
   voice?: IVoiceMeta;
   onRetry?: (messageId: string) => void;
@@ -26,13 +24,11 @@ export function VoiceBubble({
   conversationId,
   messageId,
   role,
-  displayText,
   loading = false,
   voice,
   onRetry,
 }: VoiceBubbleProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const ttsPlayerRef = useRef<SpeechPlayer | null>(null);
   const cachedUrlRef = useRef<Map<string, string>>(new Map());
   const nextSegmentIndexRef = useRef(0);
   const playbackModeRef = useRef<'single' | 'segments'>('segments');
@@ -40,13 +36,7 @@ export function VoiceBubble({
   const [isPlaying, setIsPlaying] = useState(false);
 
   const segments = useMemo(() => voice?.segments ?? [], [voice?.segments]);
-  const hasSingleSource = Boolean(voice?.local_url || voice?.file_id || voice?.kind === 'single');
-  const renderedDisplayText = useMemo(() => displayText?.trim() ?? '', [displayText]);
-  const canPlayRenderedText =
-    role === 'assistant' &&
-    Boolean(renderedDisplayText) &&
-    !voice?.file_id &&
-    segments.length === 0;
+  const hasSingleSource = Boolean(voice?.local_url || voice?.file_id);
 
   const revokeCachedUrls = useCallback(() => {
     cachedUrlRef.current.forEach((url) => {
@@ -58,7 +48,6 @@ export function VoiceBubble({
   }, []);
 
   const pausePlayback = useCallback(() => {
-    ttsPlayerRef.current?.pause();
     audioRef.current?.pause();
   }, []);
 
@@ -105,83 +94,6 @@ export function VoiceBubble({
     [conversationId, messageId, role],
   );
 
-  const playRenderedText = useCallback(async () => {
-    const audio = audioRef.current;
-    if (!audio || !renderedDisplayText) {
-      return;
-    }
-
-    const cacheKey = `${messageId}:rendered:${renderedDisplayText}`;
-    const cachedUrl = cachedUrlRef.current.get(cacheKey);
-    playbackModeRef.current = 'single';
-    if (cachedUrl) {
-      pausePlayback();
-      audio.currentTime = 0;
-      audio.src = cachedUrl;
-      audio.load();
-      await audio.play();
-      return;
-    }
-
-    const response = await fetch(api.tts, {
-      method: 'POST',
-      headers: {
-        Authorization: getAuthorization(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text: renderedDisplayText }),
-    });
-
-    const contentType =
-      response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() ||
-      '';
-
-    if (!response.ok || contentType.includes('json')) {
-      let errorMessage = `tts request failed: ${response.status}`;
-      try {
-        const payload = await response.clone().json();
-        if (typeof payload?.message === 'string' && payload.message.trim()) {
-          errorMessage = payload.message;
-        }
-      } catch {
-        // Swallow parsing failures and surface the HTTP error instead.
-      }
-      throw new Error(errorMessage);
-    }
-
-    if (
-      ttsPlayerRef.current &&
-      (contentType === 'audio/mpeg' ||
-        contentType === 'audio/mp3' ||
-        contentType === 'audio/mp4')
-    ) {
-      pausePlayback();
-      audio.currentTime = 0;
-      audio.removeAttribute('src');
-      audio.load();
-      await ttsPlayerRef.current.feedWithResponse(response);
-      return;
-    }
-
-    if (!contentType.startsWith('audio/')) {
-      throw new Error(`unexpected tts content-type: ${contentType || 'unknown'}`);
-    }
-
-    const blob = await response.blob();
-    if (!blob.size) {
-      throw new Error('voice file is empty');
-    }
-
-    const objectUrl = URL.createObjectURL(blob);
-    cachedUrlRef.current.set(cacheKey, objectUrl);
-
-    pausePlayback();
-    audio.currentTime = 0;
-    audio.src = objectUrl;
-    audio.load();
-    await audio.play();
-  }, [messageId, pausePlayback, renderedDisplayText]);
-
   const playSingle = useCallback(async () => {
     if (!voice) return;
     const audio = audioRef.current;
@@ -219,46 +131,10 @@ export function VoiceBubble({
   );
 
   useEffect(() => {
-    let disposed = false;
     const audio = audioRef.current;
 
-    const initializePlayer = async () => {
-      if (!audio) {
-        return;
-      }
-
-      const player = new SpeechPlayer({
-        audio,
-        onPlaying: () => setIsPlaying(true),
-        onPause: () => setIsPlaying(false),
-        onChunkEnd: () => {},
-        mimeType: MediaSource.isTypeSupported('audio/mpeg')
-          ? 'audio/mpeg'
-          : 'audio/mp4; codecs="mp4a.40.2"',
-      });
-
-      try {
-        await player.init();
-        if (disposed) {
-          player.pause();
-          return;
-        }
-        ttsPlayerRef.current = player;
-      } catch {
-        if (!disposed && ttsPlayerRef.current === player) {
-          ttsPlayerRef.current = null;
-        }
-      }
-    };
-
-    void initializePlayer();
-
     return () => {
-      disposed = true;
       pausePlayback();
-      if (ttsPlayerRef.current) {
-        ttsPlayerRef.current = null;
-      }
       if (audio) {
         audio.removeAttribute('src');
         audio.load();
@@ -369,11 +245,6 @@ export function VoiceBubble({
         return;
       }
 
-      if (canPlayRenderedText) {
-        await playRenderedText();
-        return;
-      }
-
       nextSegmentIndexRef.current = 0;
       await playSegment(0);
     } catch {
@@ -381,12 +252,10 @@ export function VoiceBubble({
       toast.error('语音播放失败，请稍后重试');
     }
   }, [
-    canPlayRenderedText,
     hasSingleSource,
     isPlaying,
     loading,
     pausePlayback,
-    playRenderedText,
     playSegment,
     playSingle,
     voice,
@@ -412,10 +281,8 @@ export function VoiceBubble({
 
   const durationSeconds = Math.round((voice.duration_ms ?? 0) / 1000);
   const canPlay =
-    canPlayRenderedText ||
     hasSingleSource ||
-    (voice.kind === 'segments' && segments.length > 0) ||
-    loading;
+    (voice.kind === 'segments' && segments.length > 0);
 
   return (
     <div

@@ -22,10 +22,9 @@ import {
 } from '@/hooks/use-chat-request';
 import { IClientConversation } from '@/interfaces/database/chat';
 import { cn } from '@/lib/utils';
-import { useMount } from 'ahooks';
 import { isEmpty } from 'lodash';
-import { ArrowUpRight, LogOut, Send } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { ArrowUpRight, LogOut } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 import { useHandleClickConversationCard } from '../hooks/use-click-card';
@@ -46,7 +45,7 @@ export default function Chat() {
 
   const { fetchConversationManually } = useFetchConversationManually();
 
-  const { handleConversationCardClick, controller, stopOutputMessage } =
+  const { handleConversationCardClick, controllerRef, stopOutputMessage } =
     useHandleClickConversationCard();
   const { visible: settingVisible, switchVisible: switchSettingVisible } =
     useSetModalState(true);
@@ -55,8 +54,7 @@ export default function Chat() {
   const { removeChatBox, addChatBox, chatBoxIds, hasSingleChatBox } =
     useAddChatBox(isDebugMode);
 
-  const { showEmbedModal, hideEmbedModal, embedVisible, beta } =
-    useShowEmbedModal();
+  const { hideEmbedModal, embedVisible, beta } = useShowEmbedModal();
 
   const { conversationId, isNew } = useGetChatSearchParams();
 
@@ -68,11 +66,23 @@ export default function Chat() {
 
   const fetchConversation: typeof handleConversationCardClick = useCallback(
     async (conversationId, isNew) => {
-      if (conversationId && !isNew) {
+      if (!conversationId) {
+        setCurrentConversation({} as IClientConversation);
+        return;
+      }
+
+      try {
         const conversation = await fetchConversationManually(conversationId);
         if (!isEmpty(conversation)) {
           setCurrentConversation(conversation);
+          return;
         }
+      } catch {
+        // Ignore fetch failures for not-yet-persisted temporary conversations.
+      }
+
+      if (isNew) {
+        setCurrentConversation({} as IClientConversation);
       }
     },
     [fetchConversationManually],
@@ -81,14 +91,14 @@ export default function Chat() {
   const handleSessionClick: typeof handleConversationCardClick = useCallback(
     (conversationId, isNew) => {
       handleConversationCardClick(conversationId, isNew);
-      fetchConversation(conversationId, isNew);
+      void fetchConversation(conversationId, isNew);
     },
     [fetchConversation, handleConversationCardClick],
   );
 
-  useMount(() => {
-    fetchConversation(conversationId, isNew === 'true');
-  });
+  useEffect(() => {
+    void fetchConversation(conversationId, isNew === 'true');
+  }, [conversationId, fetchConversation, isNew]);
 
   if (isDebugMode) {
     return (
@@ -103,7 +113,7 @@ export default function Chat() {
         </div>
         <MultipleChatBox
           chatBoxIds={chatBoxIds}
-          controller={controller}
+          controllerRef={controllerRef}
           removeChatBox={removeChatBox}
           addChatBox={addChatBox}
           stopOutputMessage={stopOutputMessage}
@@ -156,7 +166,7 @@ export default function Chat() {
               </CardHeader>
               <CardContent className="flex-1 p-0 min-h-0">
                 <SingleChatBox
-                  controller={controller}
+                  controllerRef={controllerRef}
                   stopOutputMessage={stopOutputMessage}
                   conversation={currentConversation}
                 ></SingleChatBox>

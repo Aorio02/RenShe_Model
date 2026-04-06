@@ -130,6 +130,7 @@ export function NextMessageInput({
               <FileUploadItemMetadata size="sm" />
               <FileUploadItemDelete asChild>
                 <Button
+                  type="button"
                   variant="secondary"
                   size="icon"
                   className="-top-1 -right-1 absolute size-4 shrink-0 cursor-pointer rounded-full"
@@ -172,13 +173,18 @@ export function NextMessageInput({
             </FileUploadTrigger>
           )}
           {sendLoading ? (
-            <Button onClick={stopOutputMessage} className="size-5 rounded-sm">
+            <Button
+              type="button"
+              onClick={stopOutputMessage}
+              className="size-5 rounded-sm"
+            >
               <CircleStop />
             </Button>
           ) : (
             <div className="flex items-center gap-3">
               {onVoiceSubmit && <AudioButton onSubmit={onVoiceSubmit} />}
               <Button
+                type="submit"
                 className="size-5 rounded-sm"
                 disabled={
                   sendDisabled || isUploading || sendLoading || !value.trim()

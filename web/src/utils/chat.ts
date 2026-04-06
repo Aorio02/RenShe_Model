@@ -6,6 +6,20 @@ import { IMessage, Message } from '@/interfaces/database/chat';
 import { omit } from 'lodash';
 import { v4 as uuid } from 'uuid';
 
+const RequestTransientMessageFields = [
+  'answer',
+  'audio_binary',
+  'audio_mime_type',
+  'chatBoxId',
+  'conversationId',
+  'created_at',
+  'data',
+  'final',
+  'prompt',
+  'reference',
+  'session_id',
+] as const;
+
 export const isConversationIdExist = (conversationId: string) => {
   return conversationId !== EmptyConversationId && conversationId !== '';
 };
@@ -30,6 +44,10 @@ export const sanitizeMessageForRequest = (message: Message | IMessage) => {
   const nextMessage: Record<string, any> = {
     ...message,
   };
+
+  RequestTransientMessageFields.forEach((field) => {
+    delete nextMessage[field];
+  });
 
   if (nextMessage.voice) {
     nextMessage.voice = {

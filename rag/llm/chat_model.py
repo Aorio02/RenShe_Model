@@ -61,6 +61,32 @@ LENGTH_NOTIFICATION_CN = "······\n由于大模型的上下文窗口大小�
 LENGTH_NOTIFICATION_EN = "...\nThe answer is truncated by your chosen LLM due to its limitation on context length."
 
 
+def _apply_native_reasoning_controls(model_name: str, request_kwargs: dict) -> dict:
+    """Disable visible/native thinking for models that support it."""
+    normalized_model_name = (model_name or "").lower()
+    request_kwargs = dict(request_kwargs)
+    extra_body = deepcopy(request_kwargs.get("extra_body") or {})
+
+    if "qwen3" in normalized_model_name:
+        extra_body.setdefault("enable_thinking", False)
+
+    # BUPT-RenShe is currently served by a gpt-oss backend with a custom alias.
+    if any(alias in normalized_model_name for alias in ("gpt-oss", "gpt_oss", "bupt-renshe")):
+        request_kwargs.setdefault("reasoning_effort", "low")
+        extra_body.setdefault("include_reasoning", False)
+
+    if extra_body:
+        request_kwargs["extra_body"] = extra_body
+
+    return request_kwargs
+
+
+def _get_reasoning_text(obj) -> str:
+    if not obj:
+        return ""
+    return getattr(obj, "reasoning_content", None) or getattr(obj, "reasoning", None) or ""
+
+
 class Base(ABC):
     def __init__(self, key, model_name, base_url, **kwargs):
         timeout = int(os.environ.get("LLM_TIMEOUT_SECONDS", 600))
@@ -144,26 +170,31 @@ class Base(ABC):
         if stop:
             request_kwargs["stop"] = stop
 
+        request_kwargs = _apply_native_reasoning_controls(self.model_name, request_kwargs)
         response = await self.async_client.chat.completions.create(**request_kwargs)
         async for resp in response:
             if not resp.choices:
                 continue
-            if not resp.choices[0].delta.content:
-                resp.choices[0].delta.content = ""
-            if kwargs.get("with_reasoning", True) and hasattr(resp.choices[0].delta, "reasoning_content") and resp.choices[0].delta.reasoning_content:
+            delta = resp.choices[0].delta
+            content = getattr(delta, "content", None) or ""
+            reasoning_text = _get_reasoning_text(delta)
+            finish_reason = resp.choices[0].finish_reason if hasattr(resp.choices[0], "finish_reason") else ""
+
+            if kwargs.get("with_reasoning", True) and reasoning_text:
                 ans = ""
                 if not reasoning_start:
                     reasoning_start = True
                     ans = "<think>"
-                ans += resp.choices[0].delta.reasoning_content + "</think>"
+                ans += reasoning_text + "</think>"
             else:
                 reasoning_start = False
-                ans = resp.choices[0].delta.content
+                ans = content
+            if not ans and finish_reason != "length":
+                continue
             tol = total_token_count_from_response(resp)
             if not tol:
-                tol = num_tokens_from_string(resp.choices[0].delta.content)
+                tol = num_tokens_from_string(content)
 
-            finish_reason = resp.choices[0].finish_reason if hasattr(resp.choices[0], "finish_reason") else ""
             if finish_reason == "length":
                 if is_chinese(ans):
                     ans += LENGTH_NOTIFICATION_CN
@@ -289,14 +320,19 @@ class Base(ABC):
             try:
                 for _ in range(self.max_rounds + 1):
                     logging.info(f"{self.tools=}")
-                    response = await self.async_client.chat.completions.create(model=self.model_name, messages=history, tools=self.tools, tool_choice="auto", **gen_conf)
+                    request_kwargs = _apply_native_reasoning_controls(
+                        self.model_name,
+                        {"model": self.model_name, "messages": history, "tools": self.tools, "tool_choice": "auto", **gen_conf},
+                    )
+                    response = await self.async_client.chat.completions.create(**request_kwargs)
                     tk_count += total_token_count_from_response(response)
                     if any([not response.choices, not response.choices[0].message]):
                         raise Exception(f"500 response structure error. Response: {response}")
 
                     if not hasattr(response.choices[0].message, "tool_calls") or not response.choices[0].message.tool_calls:
-                        if hasattr(response.choices[0].message, "reasoning_content") and response.choices[0].message.reasoning_content:
-                            ans += "<think>" + response.choices[0].message.reasoning_content + "</think>"
+                        reasoning_text = _get_reasoning_text(response.choices[0].message)
+                        if reasoning_text:
+                            ans += "<think>" + reasoning_text + "</think>"
 
                         ans += response.choices[0].message.content
                         if response.choices[0].finish_reason == "length":
@@ -346,7 +382,11 @@ class Base(ABC):
                     reasoning_start = False
                     logging.info(f"{tools=}")
 
-                    response = await self.async_client.chat.completions.create(model=self.model_name, messages=history, stream=True, tools=tools, tool_choice="auto", **gen_conf)
+                    request_kwargs = _apply_native_reasoning_controls(
+                        self.model_name,
+                        {"model": self.model_name, "messages": history, "stream": True, "tools": tools, "tool_choice": "auto", **gen_conf},
+                    )
+                    response = await self.async_client.chat.completions.create(**request_kwargs)
 
                     final_tool_calls = {}
                     answer = ""
@@ -368,28 +408,30 @@ class Base(ABC):
                                     final_tool_calls[index].function.arguments += tool_call.function.arguments or ""
                             continue
 
-                        if not hasattr(delta, "content") or delta.content is None:
-                            delta.content = ""
+                        content = getattr(delta, "content", None) or ""
+                        reasoning_text = _get_reasoning_text(delta)
+                        finish_reason = getattr(resp.choices[0], "finish_reason", "")
 
-                        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                        if reasoning_text:
                             ans = ""
                             if not reasoning_start:
                                 reasoning_start = True
                                 ans = "<think>"
-                            ans += delta.reasoning_content + "</think>"
+                            ans += reasoning_text + "</think>"
                             yield ans
                         else:
                             reasoning_start = False
-                            answer += delta.content
-                            yield delta.content
+                            if not content and finish_reason != "length":
+                                continue
+                            answer += content
+                            yield content
 
                         tol = total_token_count_from_response(resp)
                         if not tol:
-                            total_tokens += num_tokens_from_string(delta.content)
+                            total_tokens += num_tokens_from_string(content)
                         else:
                             total_tokens = tol
 
-                        finish_reason = getattr(resp.choices[0], "finish_reason", "")
                         if finish_reason == "length":
                             yield self._length_stop("")
 
@@ -413,20 +455,25 @@ class Base(ABC):
                 logging.warning(f"Exceed max rounds: {self.max_rounds}")
                 history.append({"role": "user", "content": f"Exceed max rounds: {self.max_rounds}"})
 
-                response = await self.async_client.chat.completions.create(model=self.model_name, messages=history, stream=True, tools=tools, tool_choice="auto", **gen_conf)
+                request_kwargs = _apply_native_reasoning_controls(
+                    self.model_name,
+                    {"model": self.model_name, "messages": history, "stream": True, "tools": tools, "tool_choice": "auto", **gen_conf},
+                )
+                response = await self.async_client.chat.completions.create(**request_kwargs)
 
                 async for resp in response:
                     if not hasattr(resp, "choices") or not resp.choices:
                         continue
                     delta = resp.choices[0].delta
-                    if not hasattr(delta, "content") or delta.content is None:
+                    content = getattr(delta, "content", None) or ""
+                    if not content:
                         continue
                     tol = total_token_count_from_response(resp)
                     if not tol:
-                        total_tokens += num_tokens_from_string(delta.content)
+                        total_tokens += num_tokens_from_string(content)
                     else:
                         total_tokens = tol
-                    yield delta.content
+                    yield content
 
                 yield total_tokens
                 return
@@ -459,10 +506,11 @@ class Base(ABC):
 
             return final_ans.strip(), tol_token
 
-        if self.model_name.lower().find("qwen3") >= 0:
-            kwargs["extra_body"] = {"enable_thinking": False}
-
-        response = await self.async_client.chat.completions.create(model=self.model_name, messages=history, **gen_conf, **kwargs)
+        request_kwargs = _apply_native_reasoning_controls(
+            self.model_name,
+            {"model": self.model_name, "messages": history, **gen_conf, **kwargs},
+        )
+        response = await self.async_client.chat.completions.create(**request_kwargs)
 
         if not response.choices or not response.choices[0].message or not response.choices[0].message.content:
             return "", 0
@@ -1313,25 +1361,27 @@ class LiteLLMBase(ABC):
                         continue
 
                     delta = resp.choices[0].delta
-                    if not hasattr(delta, "content") or delta.content is None:
-                        delta.content = ""
+                    content = getattr(delta, "content", None) or ""
+                    reasoning_text = _get_reasoning_text(delta)
+                    finish_reason = resp.choices[0].finish_reason if hasattr(resp.choices[0], "finish_reason") else ""
 
-                    if kwargs.get("with_reasoning", True) and hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    if kwargs.get("with_reasoning", True) and reasoning_text:
                         ans = ""
                         if not reasoning_start:
                             reasoning_start = True
                             ans = "<think>"
-                        ans += delta.reasoning_content + "</think>"
+                        ans += reasoning_text + "</think>"
                     else:
                         reasoning_start = False
-                        ans = delta.content
+                        ans = content
+                    if not ans and finish_reason != "length":
+                        continue
 
                     tol = total_token_count_from_response(resp)
                     if not tol:
-                        tol = num_tokens_from_string(delta.content)
+                        tol = num_tokens_from_string(content)
                     total_tokens += tol
 
-                    finish_reason = resp.choices[0].finish_reason if hasattr(resp.choices[0], "finish_reason") else ""
                     if finish_reason == "length":
                         if is_chinese(ans):
                             ans += LENGTH_NOTIFICATION_CN
@@ -1441,8 +1491,9 @@ class LiteLLMBase(ABC):
                     message = response.choices[0].message
 
                     if not hasattr(message, "tool_calls") or not message.tool_calls:
-                        if hasattr(message, "reasoning_content") and message.reasoning_content:
-                            ans += f"<think>{message.reasoning_content}</think>"
+                        reasoning_text = _get_reasoning_text(message)
+                        if reasoning_text:
+                            ans += f"<think>{reasoning_text}</think>"
                         ans += message.content or ""
                         if response.choices[0].finish_reason == "length":
                             ans = self._length_stop(ans)
@@ -1519,28 +1570,30 @@ class LiteLLMBase(ABC):
                                     final_tool_calls[index].function.arguments += tool_call.function.arguments or ""
                             continue
 
-                        if not hasattr(delta, "content") or delta.content is None:
-                            delta.content = ""
+                        content = getattr(delta, "content", None) or ""
+                        reasoning_text = _get_reasoning_text(delta)
+                        finish_reason = getattr(resp.choices[0], "finish_reason", "")
 
-                        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                        if reasoning_text:
                             ans = ""
                             if not reasoning_start:
                                 reasoning_start = True
                                 ans = "<think>"
-                            ans += delta.reasoning_content + "</think>"
+                            ans += reasoning_text + "</think>"
                             yield ans
                         else:
                             reasoning_start = False
-                            answer += delta.content
-                            yield delta.content
+                            if not content and finish_reason != "length":
+                                continue
+                            answer += content
+                            yield content
 
                         tol = total_token_count_from_response(resp)
                         if not tol:
-                            total_tokens += num_tokens_from_string(delta.content)
+                            total_tokens += num_tokens_from_string(content)
                         else:
                             total_tokens = tol
 
-                        finish_reason = getattr(resp.choices[0], "finish_reason", "")
                         if finish_reason == "length":
                             yield self._length_stop("")
 
@@ -1575,14 +1628,15 @@ class LiteLLMBase(ABC):
                     if not hasattr(resp, "choices") or not resp.choices:
                         continue
                     delta = resp.choices[0].delta
-                    if not hasattr(delta, "content") or delta.content is None:
+                    content = getattr(delta, "content", None) or ""
+                    if not content:
                         continue
                     tol = total_token_count_from_response(resp)
                     if not tol:
-                        total_tokens += num_tokens_from_string(delta.content)
+                        total_tokens += num_tokens_from_string(content)
                     else:
                         total_tokens = tol
-                    yield delta.content
+                    yield content
 
                 yield total_tokens
                 return
@@ -1693,4 +1747,4 @@ class LiteLLMBase(ABC):
             extra_headers["Authorization"] = f"Bearer {self.api_key}"
         if extra_headers:
             completion_args["extra_headers"] = extra_headers
-        return completion_args
+        return _apply_native_reasoning_controls(self.model_name, completion_args)

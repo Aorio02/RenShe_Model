@@ -2,7 +2,7 @@ import { ChatSearchParams } from '@/constants/chat';
 import { useGetChatSearchParams } from '@/hooks/use-chat-request';
 import { IMessage } from '@/interfaces/database/chat';
 import { generateConversationId } from '@/utils/chat';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useSetConversation } from './use-set-conversation';
 
@@ -12,38 +12,65 @@ import { useSetConversation } from './use-set-conversation';
  */
 export const useChatUrlParams = () => {
   const [currentQueryParameters, setSearchParams] = useSearchParams();
-  const newQueryParameters: URLSearchParams = useMemo(
-    () => new URLSearchParams(currentQueryParameters.toString()),
-    [currentQueryParameters],
+
+  const updateSearchParams = useCallback(
+    (updater: (params: URLSearchParams) => void) => {
+      setSearchParams((previous) => {
+        const next = new URLSearchParams(previous);
+        updater(next);
+        return next;
+      });
+    },
+    [setSearchParams],
   );
 
   const setConversationId = useCallback(
     (conversationId: string) => {
-      newQueryParameters.set(ChatSearchParams.ConversationId, conversationId);
-      setSearchParams(newQueryParameters);
+      updateSearchParams((params) => {
+        if (conversationId) {
+          params.set(ChatSearchParams.ConversationId, conversationId);
+          return;
+        }
+        params.delete(ChatSearchParams.ConversationId);
+      });
     },
-    [setSearchParams, newQueryParameters],
+    [updateSearchParams],
   );
 
   const setIsNew = useCallback(
     (isNew: string) => {
-      newQueryParameters.set(ChatSearchParams.isNew, isNew);
-      setSearchParams(newQueryParameters);
+      updateSearchParams((params) => {
+        if (isNew) {
+          params.set(ChatSearchParams.isNew, isNew);
+          return;
+        }
+        params.delete(ChatSearchParams.isNew);
+      });
     },
-    [setSearchParams, newQueryParameters],
+    [updateSearchParams],
   );
 
   const getIsNew = useCallback(() => {
-    return newQueryParameters.get(ChatSearchParams.isNew);
-  }, [newQueryParameters]);
+    return currentQueryParameters.get(ChatSearchParams.isNew);
+  }, [currentQueryParameters]);
 
   const setConversationBoth = useCallback(
     (conversationId: string, isNew: string) => {
-      newQueryParameters.set(ChatSearchParams.ConversationId, conversationId);
-      newQueryParameters.set(ChatSearchParams.isNew, isNew);
-      setSearchParams(newQueryParameters);
+      updateSearchParams((params) => {
+        if (conversationId) {
+          params.set(ChatSearchParams.ConversationId, conversationId);
+        } else {
+          params.delete(ChatSearchParams.ConversationId);
+        }
+
+        if (isNew) {
+          params.set(ChatSearchParams.isNew, isNew);
+        } else {
+          params.delete(ChatSearchParams.isNew);
+        }
+      });
     },
-    [setSearchParams, newQueryParameters],
+    [updateSearchParams],
   );
 
   return {
@@ -57,38 +84,63 @@ export const useChatUrlParams = () => {
 export function useCreateConversationBeforeSendMessage() {
   const { conversationId, isNew } = useGetChatSearchParams();
   const { setConversation } = useSetConversation();
-  const { setIsNew, setConversationBoth } = useChatUrlParams();
+  const { setConversationBoth } = useChatUrlParams();
+  const pendingCreationRef = useRef<
+    Promise<
+      | {
+          targetConversationId: string;
+          currentMessages: Array<IMessage>;
+        }
+      | undefined
+    >
+    | null
+  >(null);
 
   // Create conversation if it doesn't exist
   const createConversationBeforeSendMessage = useCallback(
     async (value: string) => {
-      let currentMessages: Array<IMessage> = [];
-      const currentConversationId = generateConversationId();
-      if (conversationId === '' || isNew === 'true') {
-        if (conversationId === '') {
-          setConversationBoth(currentConversationId, 'true');
-        }
-        const data = await setConversation(
-          value,
-          true,
-          conversationId || currentConversationId,
-        );
-        if (data.code !== 0) {
-          return;
-        } else {
-          setIsNew('');
-          currentMessages = data.data.message;
-        }
+      if (pendingCreationRef.current) {
+        return pendingCreationRef.current;
       }
 
-      const targetConversationId = conversationId || currentConversationId;
+      let currentMessages: Array<IMessage> = [];
+      const currentConversationId = conversationId || generateConversationId();
+      if (conversationId === '' || isNew === 'true') {
+        pendingCreationRef.current = (async () => {
+          try {
+            if (conversationId === '') {
+              setConversationBoth(currentConversationId, 'true');
+            }
+
+            const data = await setConversation(value, true, currentConversationId);
+            if (data.code !== 0) {
+              if (conversationId === '') {
+                setConversationBoth('', '');
+              }
+              return;
+            }
+
+            setConversationBoth(currentConversationId, '');
+            currentMessages = data.data.message;
+
+            return {
+              targetConversationId: currentConversationId,
+              currentMessages,
+            };
+          } finally {
+            pendingCreationRef.current = null;
+          }
+        })();
+
+        return pendingCreationRef.current;
+      }
 
       return {
-        targetConversationId,
+        targetConversationId: currentConversationId,
         currentMessages,
       };
     },
-    [conversationId, isNew, setConversation, setConversationBoth, setIsNew],
+    [conversationId, isNew, setConversation, setConversationBoth],
   );
 
   return {

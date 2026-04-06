@@ -564,7 +564,11 @@ export const useSelectDerivedMessages = () => {
   );
 
   const addNewestQuestion = useCallback(
-    (message: IMessage, answer: string = '') => {
+    (
+      message: IMessage,
+      answer: string = '',
+      assistantVoice?: IVoiceMeta,
+    ) => {
       setDerivedMessages((pre) => {
         return [
           ...pre,
@@ -579,6 +583,7 @@ export const useSelectDerivedMessages = () => {
             content: answer,
             conversationId: message.conversationId,
             id: buildMessageUuid({ ...message, role: MessageType.Assistant }),
+            voice: assistantVoice,
           },
         ];
       });
@@ -603,24 +608,44 @@ export const useSelectDerivedMessages = () => {
   // Add the streaming message to the last item in the message list
   const addNewestAnswer = useCallback((answer: IAnswer) => {
     setDerivedMessages((pre) => {
-      const previousMessage = pre?.at(-1);
-      return [
-        ...(pre?.slice(0, -1) ?? []),
-        {
-          ...(previousMessage ?? {}),
+      let assistantIndex = -1;
+      if (typeof answer.id === 'string') {
+        for (let index = pre.length - 1; index >= 0; index -= 1) {
+          if (
+            pre[index].role === MessageType.Assistant &&
+            pre[index].id === answer.id
+          ) {
+            assistantIndex = index;
+            break;
+          }
+        }
+      }
+      const targetIndex =
+        assistantIndex >= 0 ? assistantIndex : Math.max(0, pre.length - 1);
+      const previousMessage =
+        targetIndex >= 0 ? pre[targetIndex] : undefined;
+      const nextMessage = {
+        ...(previousMessage ?? {}),
+        role: MessageType.Assistant,
+        content: answer.answer,
+        reference: answer.reference,
+        id: buildMessageUuid({
+          id: answer.id,
           role: MessageType.Assistant,
-          content: answer.answer,
-          reference: answer.reference,
-          id: buildMessageUuid({
-            id: answer.id,
-            role: MessageType.Assistant,
-          }),
-          prompt: answer.prompt,
-          audio_binary: answer.audio_binary,
-          ...omit(answer, 'reference'),
-          voice: mergeStreamingVoice(previousMessage?.voice, answer),
-        },
-      ];
+        }),
+        prompt: answer.prompt,
+        audio_binary: answer.audio_binary,
+        ...omit(answer, 'reference'),
+        voice: mergeStreamingVoice(previousMessage?.voice, answer),
+      };
+
+      if (targetIndex < 0) {
+        return [nextMessage];
+      }
+
+      return pre.map((message, index) =>
+        index === targetIndex ? nextMessage : message,
+      );
     });
   }, []);
 

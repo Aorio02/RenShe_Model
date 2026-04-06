@@ -7,16 +7,16 @@ import {
 import { useGetChatSearchParams } from '@/hooks/use-chat-request';
 import { IAnswer, IMessage, Message } from '@/interfaces/database/chat';
 import api from '@/utils/api';
-import { buildMessageUuid } from '@/utils/chat';
+import { buildMessageUuid, sanitizeMessagesForRequest } from '@/utils/chat';
 import { trim } from 'lodash';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type MutableRefObject } from 'react';
 import { v4 as uuid } from 'uuid';
 import { useBuildFormRefs } from './use-build-form-refs';
 import { useCreateConversationBeforeSendMessage } from './use-chat-url';
 import { useUploadFile } from './use-upload-file';
 
 export function useSendMultipleChatMessage(
-  controller: AbortController,
+  controllerRef: MutableRefObject<AbortController>,
   chatBoxIds: string[],
 ) {
   const [messageRecord, setMessageRecord] = useState<
@@ -151,10 +151,13 @@ export function useSendMultipleChatMessage(
         {
           chatBoxId,
           conversation_id: currentConversationId ?? conversationId,
-          messages: [...(messages ?? derivedMessages ?? []), message],
+          messages: sanitizeMessagesForRequest([
+            ...(messages ?? derivedMessages ?? []),
+            message,
+          ]),
           ...getLLMConfigById(chatBoxId),
         },
-        controller,
+        controllerRef.current,
       );
 
       if (res && (res?.response.status !== 200 || res?.data?.code !== 0)) {
@@ -168,7 +171,7 @@ export function useSendMultipleChatMessage(
       send,
       conversationId,
       getLLMConfigById,
-      controller,
+      controllerRef,
       messageRecord,
       setValue,
       removeLatestMessage,
