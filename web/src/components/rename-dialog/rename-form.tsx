@@ -22,10 +22,10 @@ export function RenameForm({
   initialName,
   hideModal,
   onOk,
-  initialDate,
-}: IModalProps<any> & { 
+  initialIdCard,
+}: IModalProps<any> & {
   initialName?: string;
-  initialDate?: string;
+  initialIdCard?: string;
 }) {
   const { t } = useTranslation();
 
@@ -36,18 +36,18 @@ export function RenameForm({
         message: t('common.namePlaceholder'),
       })
       .trim(),
-    date: z.string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, {
-        message: t('common.dateFormatError'),
+    idCardNumber: z.string()
+      .regex(/^\d{17}[\dXx]$/, {
+        message: t('common.idCardFormatError') || '身份证号格式不正确',
       })
       .trim(),
   });
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
-    defaultValues: { 
+    defaultValues: {
       name: '',
-      date: ''
+      idCardNumber: ''
     },
   });
 
@@ -62,10 +62,10 @@ export function RenameForm({
     if (initialName) {
       form.setValue('name', initialName);
     }
-    if (initialDate) {
-      form.setValue('date', initialDate);
+    if (initialIdCard) {
+      form.setValue('idCardNumber', initialIdCard);
     }
-  }, [form, initialName, initialDate]);
+  }, [form, initialName, initialIdCard]);
 
   return (
     <Form {...form}>
@@ -92,19 +92,19 @@ export function RenameForm({
           )}
         />
 
-        {/* 年月日输入框 */}
+        {/* 身份证号输入框 */}
         <FormField
           control={form.control}
-          name="date"
+          name="idCardNumber"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('common.date')}</FormLabel>
+              <FormLabel>{t('chat.idCardNumber') || '身份证号'}</FormLabel>
               <FormControl>
                 <Input
-                  placeholder={t('common.datePlaceholder')}
+                  placeholder={t('common.idCardPlaceholder') || '请输入身份证号'}
                   {...field}
                   autoComplete="off"
-                  type="date"
+                  maxLength={18}
                 />
               </FormControl>
               <FormMessage />

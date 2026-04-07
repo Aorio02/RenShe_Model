@@ -41,28 +41,28 @@ export const useRenameChat = () => {
       similarity_threshold: 0.2,
       vector_similarity_weight: 0.3,
       top_n: 8,
-      date_of_birth: '', 
+      id_card_number: '',
       kb_ids: ["e07c00281b6711f1a6bf93a9f5ab70b5"],
     }),
     [t, tenantInfo.data.llm_id],
   );
 
   const onChatRenameOk = useCallback(
-    async (formData: { name: string; date?: string }) => {
-      const { name, date } = formData;
+    async (formData: { name: string; idCardNumber?: string }) => {
+      const { name, idCardNumber } = formData;
 
       const nextChat = {
         ...(isEmpty(chat)
           ? {
               ...InitialData,
-              date_of_birth: date || '', 
+              id_card_number: idCardNumber || '',
             }
           : {
               ...omit(chat, 'nickname', 'tenant_avatar', 'operator_permission'),
               dialog_id: chat.id,
-              date_of_birth: date || (chat as any).date_of_birth || '',
+              id_card_number: idCardNumber || (chat as any).id_card_number || '',
             }),
-        name, 
+        name,
       };
 
       const ret = await setDialog(nextChat);

@@ -15,10 +15,11 @@ import { RenameForm } from './rename-form';
 export function RenameDialog({
   hideModal,
   initialName,
+  initialIdCard,
   onOk,
   loading,
   title,
-}: IModalProps<any> & { initialName?: string; title?: ReactNode }) {
+}: IModalProps<any> & { initialName?: string; initialIdCard?: string; title?: ReactNode }) {
   const { t } = useTranslation();
 
   return (
@@ -29,6 +30,7 @@ export function RenameDialog({
         </DialogHeader>
         <RenameForm
           initialName={initialName}
+          initialIdCard={initialIdCard}
           hideModal={hideModal}
           onOk={onOk}
         ></RenameForm>
