@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Routes } from '@/routes';
 import { TFunction } from 'i18next';
-import { Banknote, Box } from 'lucide-react';
+import { Banknote, Box,Users } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useHandleMenuClick } from './hooks';
@@ -20,6 +20,7 @@ import logoImg from '@/assets/logo.png';
 const menuItems = (t: TFunction) => [
   { icon: Box, label: t('setting.model'), key: Routes.Model },
   { icon: Banknote, label: 'MCP', key: Routes.Mcp },
+  { icon: Users, label: t('setting.team'), key: Routes.Team },
 ];
 export function SideBar() {
   const pathName = useSecondPathName();
