@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { t } from 'i18next';
-import { CircleStop, Paperclip, Send, Upload, X } from 'lucide-react';
+import { CircleStop, Paperclip, Send, TableIcon, Upload, X } from 'lucide-react';
 import * as React from 'react';
 import { toast } from 'sonner';
 import { AudioButton, RecordedVoicePayload } from '../ui/audio-button';
@@ -38,6 +38,7 @@ interface IProps {
   stopOutputMessage?(): void;
   onUpload?: NonNullable<FileUploadProps['onUpload']>;
   removeFile?(file: File): void;
+  onGenerateTable?(): void;
 }
 
 export function NextMessageInput({
@@ -53,6 +54,7 @@ export function NextMessageInput({
   stopOutputMessage,
   onPressEnter,
   removeFile,
+  onGenerateTable,
 }: IProps) {
   const [files, setFiles] = React.useState<File[]>([]);
 
@@ -183,6 +185,19 @@ export function NextMessageInput({
           ) : (
             <div className="flex items-center gap-3">
               {onVoiceSubmit && <AudioButton onSubmit={onVoiceSubmit} />}
+              {onGenerateTable && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 rounded-sm"
+                  disabled={sendLoading || isUploading}
+                  onClick={onGenerateTable}
+                  title={t('chat.generateTable') || '生成业务表格'}
+                >
+                  <TableIcon className="size-3.5" />
+                </Button>
+              )}
               <Button
                 type="submit"
                 className="size-5 rounded-sm"

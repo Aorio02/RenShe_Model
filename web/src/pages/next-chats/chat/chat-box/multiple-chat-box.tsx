@@ -87,7 +87,7 @@ const ChatCard = forwardRef(function ChatCard(
   const { id: dialogId } = useParams();
   const { setDialog } = useSetDialog();
 
-  const { regenerateMessage, removeMessageById } =
+  const { regenerateMessage, removeMessageById, handleGenerateTable } =
     useSendMessage(controllerRef);
 
   const messageContainerRef = useRef<HTMLDivElement>(null);
@@ -261,6 +261,7 @@ export function MultipleChatBox({
           value={value}
           onInputChange={handleInputChange}
           onPressEnter={handlePressEnter}
+          onGenerateTable={handleGenerateTable}
           conversationId={conversationId}
           createConversationBeforeUploadDocument={
             createConversationBeforeUploadDocument

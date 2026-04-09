@@ -843,42 +843,41 @@ Related search terms:
 
 @manager.route("/export", methods=["POST"])  # noqa: F821
 #@login_required
-@validate_request("conversation_id", "id_card_number", "birthday")
+@validate_request("conversation_id", "id_card_number")
 async def export_conversation():
     req = await get_request_json()
     conversation_id = req["conversation_id"]
     id_card_number = req["id_card_number"]
-    birthday = req["birthday"]
-    logging.info(f"导出会话 {conversation_id}，用户身份证号 {id_card_number}，生日 {birthday}")
-    
-    # 1. 验证身份证号
-    if not verify_id_card_number(id_card_number):
-        return get_data_error_result(message="身份证号不匹配")
-    
-    # 2. 验证生日与身份证号中的生日是否一致
-    if not verify_birthday_match(id_card_number, birthday):
-        return get_data_error_result(message="生日信息与身份证号不一致")
-    
-    # 2. 查询会话数据
+    export_type = req.get("export_type", "conversation")
+    logging.info(f"导出会话 {conversation_id}，用户身份证号 {id_card_number}，导出类型 {export_type}")
+
     e, conv = ConversationService.get_by_id(conversation_id)
     if not e:
         return get_data_error_result(message="会话不存在")
+
+    e, dialog = DialogService.get_by_id(conv.dialog_id)
+    if not e:
+        return get_data_error_result(message="对话不存在")
+
+    stored_id_card = getattr(dialog, 'id_card_number', None)
+    logging.info(f"身份证号验证: 输入={id_card_number}, 存储={stored_id_card}")
+
+    if stored_id_card and stored_id_card != id_card_number:
+        logging.warning(f"身份证号不匹配: 输入={id_card_number}, 存储={stored_id_card}")
+        return get_data_error_result(message="身份证号不匹配")
     
-    # 3. 生成Markdown内容
     messages = conv.message
-    markdown_content = generate_markdown(messages)
     
-    # 4. 返回Markdown文件
+    if export_type == "table":
+        markdown_content = generate_table_markdown(conv, messages)
+    else:
+        markdown_content = generate_markdown(messages)
+    
     from quart import make_response
     import urllib.parse
 
-    # 如果 conv.name 是中文，比如 conv.name = "我的会话123"
-    # 1. 对中文文件名进行 RFC 5987 编码（核心步骤）
     filename_raw = f"{conv.name}.md"
-    # 编码文件名（只编码文件名部分，保留后缀）
     filename_encoded = urllib.parse.quote(filename_raw, encoding='utf-8')
-    # 2. 构建兼容所有浏览器的 Content-Disposition 头
-    # filename*=UTF-8'' 是标准写法，filename= 是兼容旧浏览器的兜底
     disposition = f"attachment; filename*=UTF-8''{filename_encoded}; filename={filename_encoded}"
 
     response = await make_response(markdown_content)
@@ -979,23 +978,88 @@ def extract_birthday_from_id(social_security_number):
 def generate_markdown(messages):
     """将会话消息转换为Markdown格式"""
     markdown_lines = []
-    
-    # 添加标题
+
     markdown_lines.append("# 会话导出")
     markdown_lines.append("")
-    
+
     for msg in messages:
         role = msg.get("role", "")
         content = msg.get("content", "")
-        
+
         if role == "user":
             markdown_lines.append("## 用户")
         elif role == "assistant":
             markdown_lines.append("## 助手")
         else:
             markdown_lines.append(f"## {role}")
-        
+
         markdown_lines.append(content)
         markdown_lines.append("")
-    
+
+    return "\n".join(markdown_lines)
+
+
+def extract_table_from_messages(messages):
+    """从消息中提取表格内容（Markdown格式的表格）
+       查找所有 assistant 消息中包含完整 Markdown 表格的内容
+    """
+    import re
+
+    def get_content(msg):
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    return item.get("text", "")
+            return str(content) if content else ""
+        return str(content) if content else ""
+
+    logging.info(f"[DEBUG] extract_table_from_messages: 共 {len(messages)} 条消息")
+
+    last_table = None
+    last_table_index = -1
+
+    for i, msg in enumerate(messages):
+        role = msg.get("role", "")
+        content = get_content(msg)
+
+        if role == "assistant" and '|' in content:
+            markdown_table_pattern = r'\|.+\|[\r\n]+\|[-:|\s]+\|[\r\n]+(?:\|.+\|[\r\n]*)+'
+            matches = re.findall(markdown_table_pattern, content, re.MULTILINE)
+            if matches:
+                last_table = matches[0]
+                last_table_index = i
+                logging.info(f"[DEBUG] 消息 {i} 包含表格，长度={len(content)}")
+
+    if last_table:
+        logging.info(f"[DEBUG] 返回消息 {last_table_index} 的表格")
+
+    return last_table
+
+
+def generate_table_markdown(conversation, messages):
+    """生成业务表格导出的Markdown格式"""
+    from datetime import datetime
+
+    markdown_lines = []
+
+    markdown_lines.append("# 业务办理表格")
+    markdown_lines.append("")
+    markdown_lines.append("## 基本信息")
+    markdown_lines.append("")
+    markdown_lines.append(f"- **会话名称**: {conversation.name or '未命名'}")
+    markdown_lines.append(f"- **导出时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    markdown_lines.append("")
+
+    table_content = extract_table_from_messages(messages)
+
+    if table_content:
+        markdown_lines.append("## 业务办理信息")
+        markdown_lines.append("")
+        markdown_lines.append(table_content)
+    else:
+        markdown_lines.append("## 业务办理信息")
+        markdown_lines.append("")
+        markdown_lines.append("*未找到生成的业务表格，请确认是否已点击「生成业务表格」按钮。*")
+
     return "\n".join(markdown_lines)

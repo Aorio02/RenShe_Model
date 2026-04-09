@@ -43,6 +43,7 @@ export function SingleChatBox({
     handleInputChange,
     handlePressEnter,
     handleVoiceSubmit,
+    handleGenerateTable,
     regenerateMessage,
     removeMessageById,
     retryVoiceMessage,
@@ -138,6 +139,7 @@ export function SingleChatBox({
         onInputChange={handleInputChange}
         onPressEnter={handlePressEnter}
         onVoiceSubmit={handleVoiceSubmit}
+        onGenerateTable={handleGenerateTable}
         conversationId={conversationId}
         createConversationBeforeUploadDocument={
           createConversationBeforeUploadDocument

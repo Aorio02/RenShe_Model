@@ -18,6 +18,7 @@ import { buildMessageUuid, sanitizeMessagesForRequest } from '@/utils/chat';
 import { getAuthorization } from '@/utils/authorization-util';
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import { trim } from 'lodash';
+import { toast } from 'sonner';
 import {
   useCallback,
   useEffect,
@@ -805,6 +806,60 @@ export const useSendMessage = (
     [conversationId, streamVoiceRequest, upsertMessage],
   );
 
+  const handleGenerateTable = useCallback(async () => {
+    if (trim(value) !== '' || derivedMessages.length === 0) {
+      toast.error('请先进行对话，再生成业务表格');
+      return;
+    }
+
+    const tablePrompt = '根据上面对话信息，生成一个业务办理表格，包含：业务名称、办理条件、所需材料。用 Markdown 表格格式输出。';
+
+    const data = await createConversationBeforeSendMessage(tablePrompt);
+
+    if (data === undefined) {
+      return;
+    }
+
+    const { targetConversationId, currentMessages } = data;
+
+    const id = uuid();
+
+    addNewestQuestion({
+      content: tablePrompt,
+      files: [],
+      id,
+      role: MessageType.User,
+      conversationId: targetConversationId,
+    }, '', assistantVoicePlaceholder);
+    setLoadingAssistantId(id);
+    if (currentDialog?.prompt_config?.tts) {
+      addAutoPlayEligibleAssistant(id);
+    }
+
+    if (done) {
+      sendMessage({
+        currentConversationId: targetConversationId,
+        messages: currentMessages,
+        message: {
+          id,
+          content: tablePrompt.trim(),
+          role: MessageType.User,
+          files: [],
+          conversationId: targetConversationId,
+        },
+      });
+    }
+  }, [
+    derivedMessages,
+    createConversationBeforeSendMessage,
+    addNewestQuestion,
+    assistantVoicePlaceholder,
+    done,
+    currentDialog?.prompt_config?.tts,
+    sendMessage,
+    addAutoPlayEligibleAssistant,
+  ]);
+
   const hasPendingAssistantVoice = useMemo(
     () =>
       derivedMessages.some(
@@ -907,6 +962,7 @@ export const useSendMessage = (
     handlePressEnter,
     handleInputChange,
     handleVoiceSubmit,
+    handleGenerateTable,
     value,
     setValue,
     regenerateMessage,

@@ -105,7 +105,8 @@ async def set_dialog():
                 "rerank_id": rerank_id,
                 "similarity_threshold": similarity_threshold,
                 "vector_similarity_weight": vector_similarity_weight,
-                "icon": icon
+                "icon": icon,
+                "id_card_number": req.get("id_card_number", ""),
             }
             if not DialogService.save(**dia):
                 return get_data_error_result(message="Fail to new a dialog!")

@@ -885,6 +885,7 @@ class Dialog(DataBaseModel):
 
     kb_ids = JSONField(null=False, default=[])
     status = CharField(max_length=1, null=True, help_text="is it validate(0: wasted, 1: validate)", default="1", index=True)
+    id_card_number = CharField(max_length=18, null=True, help_text="user id card number for export verification")
 
     class Meta:
         db_table = "dialog"

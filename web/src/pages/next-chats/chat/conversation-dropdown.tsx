@@ -32,9 +32,11 @@ export function ConversationDropdown({
   children,
   conversation,
   removeTemporaryConversation,
+  exportType = 'table',
 }: PropsWithChildren & {
   conversation: IConversation;
   removeTemporaryConversation?: (conversationId: string) => void;
+  exportType?: 'conversation' | 'table';
 }) {
   const { t } = useTranslation();
   const { setConversationBoth } = useChatUrlParams();
@@ -106,14 +108,15 @@ export function ConversationDropdown({
     });
 
     try {
-      const response = await fetch(`/api/v1/export`, {
+      const response = await fetch(`/v1/conversation/export`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          dialog_id: conversation.id,
-          id_card_number: idCardNumber.trim(), 
+          conversation_id: conversation.id,
+          id_card_number: idCardNumber.trim(),
+          export_type: exportType,
         }),
       });
 
@@ -233,7 +236,7 @@ export function ConversationDropdown({
                 placeholder={t('common.idCardPlaceholder') || '请输入身份证号'}
                 className="col-span-3"
                 disabled={isExporting}
-                inputMode="text" 
+                inputMode="text"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isExporting) {
                     handleConfirmExport();
