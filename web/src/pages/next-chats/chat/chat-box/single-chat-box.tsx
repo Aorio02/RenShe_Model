@@ -69,7 +69,17 @@ export function SingleChatBox({
       setDerivedMessages((previous) => {
         const switchedConversation =
           hydratedConversationIdRef.current !== serverConversationId;
+        const alreadyShowingTargetConversation = previous.some(
+          (message) => message.conversationId === serverConversationId,
+        );
         hydratedConversationIdRef.current = serverConversationId;
+
+        if (
+          alreadyShowingTargetConversation &&
+          previous.length >= messages.length
+        ) {
+          return previous;
+        }
 
         if (switchedConversation || previous.length === 0) {
           return messages;

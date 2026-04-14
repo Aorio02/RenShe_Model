@@ -71,6 +71,11 @@ export default function Chat() {
         return;
       }
 
+      if (isNew) {
+        setCurrentConversation({} as IClientConversation);
+        return;
+      }
+
       try {
         const conversation = await fetchConversationManually(conversationId);
         if (!isEmpty(conversation)) {
