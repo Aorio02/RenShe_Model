@@ -36,7 +36,8 @@ export function VoiceBubble({
   const [isPlaying, setIsPlaying] = useState(false);
 
   const segments = useMemo(() => voice?.segments ?? [], [voice?.segments]);
-  const hasSingleSource = Boolean(voice?.local_url || voice?.file_id);
+  const hasSingleSource =
+    voice?.kind === 'single' && Boolean(voice.local_url || voice.file_id);
 
   const revokeCachedUrls = useCallback(() => {
     cachedUrlRef.current.forEach((url) => {
@@ -94,8 +95,22 @@ export function VoiceBubble({
     [conversationId, messageId, role],
   );
 
+  const primeSegment = useCallback(
+    async (index: number) => {
+      const segment = segments[index];
+      if (!segment) {
+        return;
+      }
+      if (!segment.file_id || cachedUrlRef.current.has(`${messageId}:${segment.seq}`)) {
+        return;
+      }
+      await fetchRemoteUrl(segment.seq);
+    },
+    [fetchRemoteUrl, messageId, segments],
+  );
+
   const playSingle = useCallback(async () => {
-    if (!voice) return;
+    if (!voice || voice.kind !== 'single') return;
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -125,9 +140,10 @@ export function VoiceBubble({
       audio.src = sourceUrl;
       audio.load();
       nextSegmentIndexRef.current = index;
+      void primeSegment(index + 1);
       await audio.play();
     },
-    [fetchRemoteUrl, segments],
+    [fetchRemoteUrl, primeSegment, segments],
   );
 
   useEffect(() => {
@@ -293,7 +309,7 @@ export function VoiceBubble({
           : 'bg-muted/60',
       )}
     >
-      <audio ref={audioRef} preload="none" />
+      <audio ref={audioRef} preload="auto" />
       <Button
         type="button"
         size="icon"

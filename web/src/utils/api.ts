@@ -136,6 +136,16 @@ export default {
   completeConversation: `${api_host}/conversation/completion`,
   voiceCompletion: `${api_host}/conversation/voice_completion`,
   retryVoiceCompletion: `${api_host}/conversation/retry_voice_completion`,
+  waitAssistantVoice: ({
+    conversationId,
+    messageId,
+    timeout,
+  }: {
+    conversationId: string;
+    messageId: string;
+    timeout?: number;
+  }) =>
+    `${api_host}/conversation/wait_assistant_voice?conversation_id=${conversationId}&message_id=${messageId}${typeof timeout === 'number' ? `&timeout=${timeout}` : ''}`,
   voiceFile: ({
     conversationId,
     messageId,

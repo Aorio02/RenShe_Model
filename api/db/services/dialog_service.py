@@ -48,6 +48,221 @@ from common.string_utils import remove_redundant_spaces
 from common import settings
 
 
+LOW_RELEVANCE_SHORT_QUERY_LEN = 8
+LOW_RELEVANCE_MIN_SIMILARITY = 0.55
+LOW_RELEVANCE_MIN_TERM_SIMILARITY = 0.5
+NO_KNOWLEDGE_FALLBACK = "知识库中未找到您要的答案！"
+SELF_REFERENCE_QUERY_PATTERN = re.compile(
+    r"^(?:请|麻烦|帮我|先)?(?:介绍一下自己|介绍下自己|介绍你自己|介绍下你自己|介绍一下你自己|自我介绍一下|你是谁|你叫什么|你的身份|你是什么助手|你能做什么|你可以做什么|你有什么功能|你的能力)(?:吧|呀|呢|啊|哦|吗|嘛|。|？|\?|！|!)*$"
+)
+GREETING_QUERY_PATTERN = re.compile(
+    r"^(?:你好|您好|嗨|哈喽|hello|hi|在吗|在么)(?:呀|啊|哦|呢|吧|。|？|\?|！|!)*$",
+    flags=re.IGNORECASE,
+)
+GENERIC_DIALOG_NAME_PATTERN = re.compile(r"(测试|test|语音|聊天|对话|chat)", flags=re.IGNORECASE)
+HR_ASSISTANT_DOMAIN_PATTERN = re.compile(
+    r"(人社|社保|养老|退休|失业|工伤|医保|就业|劳动|人才|参保|待遇|社保卡|人事档案|劳动合同)"
+)
+
+
+def _normalize_user_query(query: str) -> str:
+    return re.sub(r"\s+", "", remove_redundant_spaces(query or ""))
+
+
+def _matches_assistant_self_intro_query(query: str) -> bool:
+    return bool(SELF_REFERENCE_QUERY_PATTERN.search(_normalize_user_query(query)))
+
+
+def _matches_assistant_greeting_query(query: str) -> bool:
+    return bool(GREETING_QUERY_PATTERN.search(_normalize_user_query(query)))
+
+
+def _top_chunk_similarity(kbinfos: dict, field: str) -> float:
+    top = 0.0
+    for chunk in (kbinfos or {}).get("chunks") or []:
+        if not isinstance(chunk, dict):
+            continue
+        try:
+            top = max(top, float(chunk.get(field, 0.0) or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return top
+
+
+def _should_drop_low_relevance_chunks(
+    questions: list[str],
+    kbinfos: dict,
+    similarity_threshold: float,
+) -> bool:
+    chunks = (kbinfos or {}).get("chunks") or []
+    if not chunks:
+        return False
+
+    query_text = _normalize_user_query(" ".join(questions or []))
+    if not query_text:
+        return False
+
+    top_similarity = _top_chunk_similarity(kbinfos, "similarity")
+    top_term_similarity = _top_chunk_similarity(kbinfos, "term_similarity")
+    strict_similarity = max(float(similarity_threshold or 0.0) + 0.18, LOW_RELEVANCE_MIN_SIMILARITY)
+    is_short_query = len(query_text) <= LOW_RELEVANCE_SHORT_QUERY_LEN
+    is_self_reference = _matches_assistant_self_intro_query(query_text)
+
+    return (
+        (is_short_query or is_self_reference)
+        and top_similarity < strict_similarity
+        and top_term_similarity < LOW_RELEVANCE_MIN_TERM_SIMILARITY
+    )
+
+
+def _resolve_empty_knowledge_response(prompt_config: dict) -> str:
+    empty_response = remove_redundant_spaces(prompt_config.get("empty_response", "") or "")
+    if empty_response:
+        return empty_response
+
+    system_prompt = prompt_config.get("system", "") or ""
+    if NO_KNOWLEDGE_FALLBACK in system_prompt:
+        return NO_KNOWLEDGE_FALLBACK
+
+    return ""
+
+
+def _resolve_assistant_name(dialog, source_text: str) -> str:
+    dialog_name = remove_redundant_spaces(getattr(dialog, "name", "") or "")
+    if dialog_name and not GENERIC_DIALOG_NAME_PATTERN.search(dialog_name):
+        return dialog_name
+    if HR_ASSISTANT_DOMAIN_PATTERN.search(source_text or ""):
+        return "人社政策咨询助手"
+    return "智能问答助手"
+
+
+def _build_assistant_capability_intro(dialog, prompt_config: dict, kbs) -> str:
+    kb_names = [
+        remove_redundant_spaces(getattr(kb, "name", "") or "")
+        for kb in (kbs or [])
+        if remove_redundant_spaces(getattr(kb, "name", "") or "")
+    ]
+    source_text = " ".join(
+        filter(
+            None,
+            [
+                getattr(dialog, "name", "") or "",
+                getattr(dialog, "description", "") or "",
+                prompt_config.get("system", "") or "",
+                " ".join(kb_names),
+            ],
+        )
+    )
+    assistant_name = _resolve_assistant_name(dialog, source_text)
+
+    if HR_ASSISTANT_DOMAIN_PATTERN.search(source_text):
+        scope_sentence = "当前重点支持养老保险、就业服务、劳动关系、社保待遇等人社相关问题。"
+        capability_sentence = (
+            "我可以帮你解读政策口径，说明办理条件、所需材料、办理流程、待遇标准和注意事项，"
+            "也可以结合你的具体情况做针对性说明。"
+        )
+    else:
+        scope_sentence = "当前重点支持已接入知识库范围内的业务问答、资料解读和信息梳理。"
+        capability_sentence = (
+            "我可以帮你回答知识库相关问题，梳理条件、流程、规则差异和注意事项，"
+            "也可以把复杂内容整理成更易理解的要点。"
+        )
+
+    if kb_names:
+        kb_summary = "、".join(kb_names[:3])
+        if len(kb_names) > 3:
+            kb_summary += "等知识库"
+        else:
+            kb_summary += "知识库"
+        kb_sentence = f"回答时我会优先结合当前接入的{kb_summary}。"
+    else:
+        kb_sentence = "回答时我会基于当前对话配置直接给出说明。"
+
+    return remove_redundant_spaces(
+        f"我是{assistant_name}。{scope_sentence}{capability_sentence}{kb_sentence}"
+        "如果你告诉我更具体的场景，比如参保地、年龄、缴费情况或办理目标，我可以继续细化回答。"
+    )
+
+
+def _build_assistant_greeting(dialog, prompt_config: dict, kbs) -> str:
+    kb_names = [
+        remove_redundant_spaces(getattr(kb, "name", "") or "")
+        for kb in (kbs or [])
+        if remove_redundant_spaces(getattr(kb, "name", "") or "")
+    ]
+    source_text = " ".join(
+        filter(
+            None,
+            [
+                getattr(dialog, "name", "") or "",
+                getattr(dialog, "description", "") or "",
+                prompt_config.get("system", "") or "",
+                " ".join(kb_names),
+            ],
+        )
+    )
+    assistant_name = _resolve_assistant_name(dialog, source_text)
+    if HR_ASSISTANT_DOMAIN_PATTERN.search(source_text):
+        return (
+            f"您好，我是{assistant_name}。"
+            "我可以帮您解答养老保险、就业服务、社保待遇等人社相关问题，也可以说明办理条件、所需材料和办理流程。"
+            "您想先了解哪一项？"
+        )
+    return (
+        f"您好，我是{assistant_name}。"
+        "我可以结合当前知识库为您解答问题，并帮您梳理办理条件、步骤和注意事项。"
+        "您想先了解什么？"
+    )
+
+
+async def _yield_static_answer(
+    answer_text: str,
+    *,
+    stream: bool,
+    reference: dict | None = None,
+    prompt: str = "",
+    tts_mdl=None,
+):
+    reference = reference if isinstance(reference, dict) else {}
+    prompt = prompt or ""
+    answer_text = _remove_think_blocks(answer_text or "")
+
+    if stream:
+        if answer_text:
+            yield {
+                "answer": answer_text,
+                "reference": {},
+                "audio_binary": None,
+                "audio_mime_type": None,
+                "prompt": "",
+                "created_at": time.time(),
+                "final": False,
+            }
+        audio_binary = tts(tts_mdl, answer_text)
+        audio_mime_type = _normalize_tts_mime_type(tts_mdl) if audio_binary else None
+        yield {
+            "answer": "",
+            "reference": reference,
+            "audio_binary": audio_binary,
+            "audio_mime_type": audio_mime_type,
+            "prompt": prompt,
+            "created_at": time.time(),
+            "final": True,
+        }
+        return
+
+    audio_binary = tts(tts_mdl, answer_text)
+    audio_mime_type = _normalize_tts_mime_type(tts_mdl) if audio_binary else None
+    yield {
+        "answer": answer_text,
+        "reference": reference,
+        "audio_binary": audio_binary,
+        "audio_mime_type": audio_mime_type,
+        "prompt": prompt,
+        "created_at": time.time(),
+    }
+
+
 class DialogService(CommonService):
     model = Dialog
 
@@ -196,6 +411,29 @@ async def async_chat_solo(dialog, messages, stream=True, enable_tts=True):
     msg = [{"role": m["role"], "content": re.sub(r"##\d+\$\$", "", m["content"])} for m in messages if m["role"] != "system"]
     if attachments and msg:
         msg[-1]["content"] += attachments
+    latest_query = msg[-1]["content"] if msg else ""
+    if _matches_assistant_greeting_query(latest_query):
+        greeting = _build_assistant_greeting(dialog, prompt_config, [])
+        async for ans in _yield_static_answer(
+            greeting,
+            stream=stream,
+            reference={},
+            prompt="\n\n### Query:\n%s" % latest_query,
+            tts_mdl=tts_mdl,
+        ):
+            yield ans
+        return
+    if _matches_assistant_self_intro_query(latest_query):
+        intro = _build_assistant_capability_intro(dialog, prompt_config, [])
+        async for ans in _yield_static_answer(
+            intro,
+            stream=stream,
+            reference={},
+            prompt="\n\n### Query:\n%s" % latest_query,
+            tts_mdl=tts_mdl,
+        ):
+            yield ans
+        return
     if stream:
         stream_iter = chat_mdl.async_chat_streamly_delta(prompt_config.get("system", ""), msg, dialog.llm_setting)
         last_state = None
@@ -270,8 +508,8 @@ BAD_CITATION_PATTERNS = [
     re.compile(r"ref\s*(\d+)", flags=re.IGNORECASE),  # ref12、REF 12
 ]
 
-TTS_STREAM_MIN_CHARS = 12
-TTS_STREAM_MAX_CHARS = 40
+TTS_STREAM_MIN_CHARS = 18
+TTS_STREAM_MAX_CHARS = 70
 TTS_STREAM_FLUSH_SECONDS = 0.6
 TTS_STREAM_PUNCTUATION = "。！？；!?;\n"
 
@@ -396,12 +634,42 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
 
     prompt_config = dialog.prompt_config
     field_map = KnowledgebaseService.get_field_map(dialog.kb_ids)
+    latest_query = questions[-1] if questions else ""
+    if _matches_assistant_greeting_query(latest_query):
+        greeting = _build_assistant_greeting(dialog, prompt_config, kbs)
+        async for ans in _yield_static_answer(
+            greeting,
+            stream=stream,
+            reference={},
+            prompt="\n\n### Query:\n%s" % latest_query,
+            tts_mdl=tts_mdl,
+        ):
+            yield ans
+        return
+    if _matches_assistant_self_intro_query(latest_query):
+        intro = _build_assistant_capability_intro(dialog, prompt_config, kbs)
+        async for ans in _yield_static_answer(
+            intro,
+            stream=stream,
+            reference={},
+            prompt="\n\n### Query:\n%s" % latest_query,
+            tts_mdl=tts_mdl,
+        ):
+            yield ans
+        return
     # try to use sql if field mapping is good to go
     if field_map:
         logging.debug("Use SQL to retrieval:{}".format(questions[-1]))
         ans = await use_sql(questions[-1], field_map, dialog.tenant_id, chat_mdl, prompt_config.get("quote", True), dialog.kb_ids)
         if ans:
-            yield ans
+            async for item in _yield_static_answer(
+                ans.get("answer", ""),
+                stream=stream,
+                reference=ans.get("reference"),
+                prompt=ans.get("prompt", ""),
+                tts_mdl=tts_mdl,
+            ):
+                yield item
             return
 
     for p in prompt_config["parameters"]:
@@ -532,14 +800,29 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
                 "Knowledge retrieval failed; fallback to direct chat without retrieval."
             )
 
+    if _should_drop_low_relevance_chunks(questions, kbinfos, dialog.similarity_threshold):
+        logging.info(
+            "Drop low relevance retrieval for query=%s top_similarity=%.4f top_term_similarity=%.4f",
+            " ".join(questions),
+            _top_chunk_similarity(kbinfos, "similarity"),
+            _top_chunk_similarity(kbinfos, "term_similarity"),
+        )
+        kbinfos = {"total": 0, "chunks": [], "doc_aggs": []}
+
     knowledges = kb_prompt(kbinfos, max_tokens)
     logging.debug("{}->{}".format(" ".join(questions), "\n->".join(knowledges)))
 
     retrieval_ts = timer()
-    if not knowledges and prompt_config.get("empty_response") and not retrieval_failed:
-        empty_res = prompt_config["empty_response"]
-        yield {"answer": empty_res, "reference": kbinfos, "prompt": "\n\n### Query:\n%s" % " ".join(questions),
-               "audio_binary": tts(tts_mdl, empty_res), "final": True}
+    empty_res = _resolve_empty_knowledge_response(prompt_config)
+    if not knowledges and empty_res and not retrieval_failed:
+        async for ans in _yield_static_answer(
+            empty_res,
+            stream=stream,
+            reference=kbinfos,
+            prompt="\n\n### Query:\n%s" % " ".join(questions),
+            tts_mdl=tts_mdl,
+        ):
+            yield ans
         return
 
     kwargs["knowledge"] = (

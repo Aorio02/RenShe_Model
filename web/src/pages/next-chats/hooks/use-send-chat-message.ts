@@ -7,7 +7,6 @@ import {
   useSendMessageWithSse,
 } from '@/hooks/logic-hooks';
 import {
-  useFetchConversationManually,
   useFetchDialog,
   useGetChatSearchParams,
 } from '@/hooks/use-chat-request';
@@ -37,6 +36,50 @@ const sortVoiceSegments = (
   segments: NonNullable<IMessage['voice']>['segments'] = [],
 ) => {
   return [...segments].sort((a, b) => a.seq - b.seq);
+};
+
+const mergeVoiceMeta = (
+  previousVoice: IMessage['voice'] | undefined,
+  incomingVoice: IMessage['voice'] | undefined,
+) => {
+  if (!incomingVoice) {
+    return undefined;
+  }
+
+  if (incomingVoice.kind === 'segments') {
+    const previousSegments =
+      previousVoice?.kind === 'segments' ? previousVoice.segments ?? [] : [];
+
+    return {
+      ...(previousVoice?.kind === 'segments' ? previousVoice : {}),
+      ...incomingVoice,
+      kind: 'segments' as const,
+      file_id: undefined,
+      local_url: undefined,
+      segments: sortVoiceSegments(
+        (incomingVoice.segments ?? []).map((segment) => {
+          const previousSegment = previousSegments.find(
+            (item) => item.seq === segment.seq,
+          );
+
+          return {
+            ...segment,
+            object_url: segment.file_id
+              ? undefined
+              : previousSegment?.object_url,
+          };
+        }),
+      ),
+    };
+  }
+
+  return {
+    ...(previousVoice ?? {}),
+    ...incomingVoice,
+    kind: 'single' as const,
+    segments: undefined,
+    local_url: incomingVoice.file_id ? undefined : previousVoice?.local_url,
+  };
 };
 
 const getVoiceFileExtension = (mimeType: string) => {
@@ -112,17 +155,16 @@ export const useSendMessage = (
   const [loadingAssistantId, setLoadingAssistantId] = useState('');
   const [assistantVoiceAutoPlayNonceMap, setAssistantVoiceAutoPlayNonceMap] =
     useState<Record<string, number>>({});
-  const derivedMessagesRef = useRef<IMessage[]>([]);
   const autoPlayEligibleAssistantIdsRef = useRef<Set<string>>(new Set());
   const previousConversationIdRef = useRef(conversationId);
-  const ttsPollingTimerRef = useRef<number | null>(null);
-  const ttsPollingInFlightRef = useRef(false);
   const assistantVoiceAutoPlayIssuedRef = useRef<Set<string>>(new Set());
   const assistantVoiceAutoPlayCounterRef = useRef(0);
+  const assistantVoiceWaitControllersRef = useRef<
+    Map<string, AbortController>
+  >(new Map());
 
   const { handleUploadFile, isUploading, removeFile, files, clearFiles } =
     useUploadFile();
-  const { fetchConversationManually } = useFetchConversationManually();
 
   const { send, answer, done } = useSendMessageWithSse(
     api.completeConversation,
@@ -138,54 +180,6 @@ export const useSendMessage = (
     removeMessagesAfterCurrentMessage,
     setDerivedMessages,
   } = useSelectNextMessages();
-
-  const sendMessage = useCallback(
-    async ({
-      message,
-      currentConversationId,
-      messages,
-    }: {
-      message: IMessage;
-      currentConversationId?: string;
-      messages?: IMessage[];
-    }) => {
-      const res = await send(
-        {
-          conversation_id: currentConversationId ?? conversationId,
-          live_tts: Boolean(currentDialog?.prompt_config?.tts),
-          messages: sanitizeMessagesForRequest([
-            ...(Array.isArray(messages) && messages?.length > 0
-              ? messages
-              : (derivedMessages ?? [])),
-            message,
-          ]),
-        },
-        controllerRef.current,
-      );
-
-      if (res && (res?.response.status !== 200 || res?.data?.code !== 0)) {
-        setLoadingAssistantId('');
-        // cancel loading
-        setValue(message.content);
-        removeLatestMessage();
-      }
-    },
-    [
-      derivedMessages,
-      conversationId,
-      currentDialog?.prompt_config?.tts,
-      removeLatestMessage,
-      setValue,
-      send,
-      controllerRef,
-    ],
-  );
-
-  const { regenerateMessage } = useRegenerateMessage({
-    removeMessagesAfterCurrentMessage,
-    sendMessage,
-    messages: derivedMessages,
-  });
 
   const assistantVoicePlaceholder = useMemo(
     () =>
@@ -286,135 +280,169 @@ export const useSendMessage = (
     autoPlayEligibleAssistantIdsRef.current.delete(messageId);
   }, []);
 
-  const stopAssistantTtsPolling = useCallback(() => {
-    if (ttsPollingTimerRef.current !== null) {
-      window.clearTimeout(ttsPollingTimerRef.current);
-      ttsPollingTimerRef.current = null;
+  const abortAssistantVoiceWait = useCallback((messageId?: string) => {
+    if (messageId) {
+      assistantVoiceWaitControllersRef.current.get(messageId)?.abort();
+      assistantVoiceWaitControllersRef.current.delete(messageId);
+      return;
     }
-    ttsPollingInFlightRef.current = false;
+
+    assistantVoiceWaitControllersRef.current.forEach((controller) => {
+      controller.abort();
+    });
+    assistantVoiceWaitControllersRef.current.clear();
   }, []);
 
-  const mergeAssistantVoiceFromConversation = useCallback(
-    (serverMessages: IMessage[] = []) => {
-      if (!serverMessages.length) {
+  const waitForAssistantVoice = useCallback(
+    async ({
+      targetConversationId,
+      messageId,
+    }: {
+      targetConversationId: string;
+      messageId: string;
+    }) => {
+      if (
+        !targetConversationId ||
+        !messageId ||
+        assistantVoiceWaitControllersRef.current.has(messageId)
+      ) {
         return;
       }
 
-      const currentMessages = derivedMessagesRef.current;
-      const assistantMessageMap = new Map(
-        serverMessages
-          .filter(
-            (message) =>
-              message.role === MessageType.Assistant && typeof message.id === 'string',
-          )
-          .map((message) => [message.id, message] as const),
-      );
+      const controller = new AbortController();
+      assistantVoiceWaitControllersRef.current.set(messageId, controller);
 
-      const readyToAutoPlayIds = currentMessages
-        .filter((message) => {
-          if (message.role !== MessageType.Assistant || !message.id) {
-            return false;
-          }
-          if (!autoPlayEligibleAssistantIdsRef.current.has(message.id)) {
-            return false;
-          }
-          const nextVoice = assistantMessageMap.get(message.id)?.voice;
-          return (
-            message.voice?.status !== 'ready' &&
-            nextVoice?.status === 'ready' &&
-            nextVoice.kind === 'single' &&
-            Boolean(nextVoice.file_id)
-          );
-        })
-        .map((message) => message.id);
-
-      const completedMessageIds = currentMessages
-        .filter((message) => {
-          if (message.role !== MessageType.Assistant || !message.id) {
-            return false;
-          }
-          if (!autoPlayEligibleAssistantIdsRef.current.has(message.id)) {
-            return false;
-          }
-          const nextVoice = assistantMessageMap.get(message.id)?.voice;
-          return Boolean(nextVoice && nextVoice.status !== 'streaming');
-        })
-        .map((message) => message.id);
-
-      setDerivedMessages((prev) =>
-        prev.map((message) => {
-          if (message.role !== MessageType.Assistant || !message.id) {
-            return message;
-          }
-
-          const serverMessage = assistantMessageMap.get(message.id);
-          if (!serverMessage?.voice) {
-            return message;
-          }
-
-          const previousSegments = message.voice?.segments ?? [];
-          const nextSegments = Array.isArray(serverMessage.voice.segments)
-            ? sortVoiceSegments(
-                serverMessage.voice.segments.map((segment) => {
-                  const previousSegment = previousSegments.find(
-                    (item) => item.seq === segment.seq,
-                  );
-
-                  return {
-                    ...segment,
-                    object_url: segment.file_id
-                      ? undefined
-                      : previousSegment?.object_url,
-                  };
-                }),
-              )
-            : undefined;
-
-          return {
-            ...message,
-            voice: {
-              ...(message.voice ?? {}),
-              ...(serverMessage.voice ?? {}),
-              local_url: serverMessage.voice.file_id
-                ? undefined
-                : message.voice?.local_url,
-              segments: nextSegments,
-            },
-          };
-        }),
-      );
-
-      completedMessageIds.forEach((messageId) => {
-        autoPlayEligibleAssistantIdsRef.current.delete(messageId);
-      });
-      readyToAutoPlayIds.forEach((messageId) => {
-        markAssistantVoiceAutoPlay(messageId);
-      });
-    },
-    [markAssistantVoiceAutoPlay, setDerivedMessages],
-  );
-
-  const pollConversationForAssistantVoice = useCallback(
-    async (targetConversationId: string) => {
-      if (!targetConversationId || ttsPollingInFlightRef.current) {
-        return;
-      }
-
-      ttsPollingInFlightRef.current = true;
       try {
-        const conversation = await fetchConversationManually(targetConversationId);
-        if (conversation?.id !== targetConversationId) {
+        const response = await fetch(
+          api.waitAssistantVoice({
+            conversationId: targetConversationId,
+            messageId,
+            timeout: 120,
+          }),
+          {
+            headers: {
+              Authorization: getAuthorization(),
+            },
+            signal: controller.signal,
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(`wait assistant voice failed: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const message = payload?.data?.message as IMessage | undefined;
+        if (!message?.id) {
           return;
         }
-        mergeAssistantVoiceFromConversation(conversation.message ?? []);
-      } catch {
-        // Ignore transient polling failures and retry on the next cycle.
+
+        const nextMessage = {
+          ...message,
+          role: MessageType.Assistant,
+          conversationId: targetConversationId,
+        } as IMessage;
+
+        upsertMessage(nextMessage.id, MessageType.Assistant, (previous) => ({
+          ...(previous ?? nextMessage),
+          ...nextMessage,
+          voice: mergeVoiceMeta(previous?.voice, nextMessage.voice),
+          reference: nextMessage.reference ?? previous?.reference,
+        }));
+
+        if (
+          autoPlayEligibleAssistantIdsRef.current.has(nextMessage.id) &&
+          nextMessage.voice?.kind === 'single' &&
+          nextMessage.voice.status === 'ready' &&
+          nextMessage.voice.file_id
+        ) {
+          removeAutoPlayEligibleAssistant(nextMessage.id);
+          markAssistantVoiceAutoPlay(nextMessage.id);
+          return;
+        }
+
+        if (nextMessage.voice?.status !== 'streaming') {
+          removeAutoPlayEligibleAssistant(nextMessage.id);
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        console.warn('wait assistant voice failed', error);
       } finally {
-        ttsPollingInFlightRef.current = false;
+        assistantVoiceWaitControllersRef.current.delete(messageId);
       }
     },
-    [fetchConversationManually, mergeAssistantVoiceFromConversation],
+    [
+      markAssistantVoiceAutoPlay,
+      removeAutoPlayEligibleAssistant,
+      upsertMessage,
+    ],
   );
+
+  const sendMessage = useCallback(
+    async ({
+      message,
+      currentConversationId,
+      messages,
+    }: {
+      message: IMessage;
+      currentConversationId?: string;
+      messages?: IMessage[];
+    }) => {
+      const targetConversationId = currentConversationId ?? conversationId;
+      const res = await send(
+        {
+          conversation_id: targetConversationId,
+          live_tts: Boolean(currentDialog?.prompt_config?.tts),
+          messages: sanitizeMessagesForRequest([
+            ...(Array.isArray(messages) && messages?.length > 0
+              ? messages
+              : (derivedMessages ?? [])),
+            message,
+          ]),
+        },
+        controllerRef.current,
+      );
+
+      if (res && (res?.response.status !== 200 || res?.data?.code !== 0)) {
+        setLoadingAssistantId('');
+        // cancel loading
+        setValue(message.content);
+        removeLatestMessage();
+        return;
+      }
+
+      if (
+        res?.response.status === 200 &&
+        res?.data?.code === 0 &&
+        currentDialog?.prompt_config?.tts &&
+        targetConversationId &&
+        message.id
+      ) {
+        void waitForAssistantVoice({
+          targetConversationId,
+          messageId: message.id,
+        });
+      }
+    },
+    [
+      derivedMessages,
+      conversationId,
+      currentDialog?.prompt_config?.tts,
+      removeLatestMessage,
+      setValue,
+      send,
+      controllerRef,
+      waitForAssistantVoice,
+    ],
+  );
+
+  const { regenerateMessage } = useRegenerateMessage({
+    removeMessagesAfterCurrentMessage,
+    sendMessage,
+    messages: derivedMessages,
+  });
 
   const handleVoiceStreamEvent = useCallback(
     (event: any, targetConversationId: string) => {
@@ -434,15 +462,7 @@ export const useSendMessage = (
         upsertMessage(message.id, message.role, (previous) => ({
           ...(previous ?? message),
           ...message,
-          voice: message.voice
-            ? {
-                ...(previous?.voice ?? {}),
-                ...(message.voice ?? {}),
-                local_url: message.voice?.file_id
-                  ? undefined
-                  : previous?.voice?.local_url,
-              }
-            : undefined,
+          voice: mergeVoiceMeta(previous?.voice, message.voice),
         }));
         return;
       }
@@ -487,25 +507,7 @@ export const useSendMessage = (
         upsertMessage(message.id, MessageType.Assistant, (previous) => ({
           ...(previous ?? message),
           ...message,
-          voice: message.voice
-            ? {
-                ...(previous?.voice ?? {}),
-                ...(message.voice ?? {}),
-                segments: sortVoiceSegments(
-                  (message.voice?.segments ?? []).map((segment) => {
-                    const previousSegment = previous?.voice?.segments?.find(
-                      (item) => item.seq === segment.seq,
-                    );
-                    return {
-                      ...segment,
-                      object_url: segment.file_id
-                        ? undefined
-                        : previousSegment?.object_url,
-                    };
-                  }),
-                ),
-              }
-            : undefined,
+          voice: mergeVoiceMeta(previous?.voice, message.voice),
           reference: data.reference,
         }));
         if (
@@ -531,6 +533,7 @@ export const useSendMessage = (
           upsertMessage(data.client_message_id, MessageType.User, (previous) => ({
             ...(previous as IMessage),
             voice: {
+              kind: previous?.voice?.kind ?? 'single',
               ...(previous?.voice ?? {}),
               status: 'failed',
               error: data.message,
@@ -546,25 +549,7 @@ export const useSendMessage = (
           );
           upsertMessage(data.message_id, MessageType.Assistant, (previous) => {
             const message = data.message as IMessage | undefined;
-            const nextVoice = message?.voice
-              ? {
-                  ...(previous?.voice ?? {}),
-                  ...(message.voice ?? {}),
-                  segments: sortVoiceSegments(
-                    (message.voice?.segments ?? []).map((segment) => {
-                      const previousSegment = previous?.voice?.segments?.find(
-                        (item) => item.seq === segment.seq,
-                      );
-                      return {
-                        ...segment,
-                        object_url: segment.file_id
-                          ? undefined
-                          : previousSegment?.object_url,
-                      };
-                    }),
-                  ),
-                }
-              : undefined;
+            const nextVoice = mergeVoiceMeta(previous?.voice, message?.voice);
 
             return {
               ...(previous ?? {
@@ -765,6 +750,7 @@ export const useSendMessage = (
         upsertMessage(clientMessageId, MessageType.User, (previous) => ({
           ...(previous as IMessage),
           voice: {
+            kind: previous?.voice?.kind ?? 'single',
             ...(previous?.voice ?? {}),
             status: 'failed',
             error: '发送失败',
@@ -796,6 +782,7 @@ export const useSendMessage = (
         upsertMessage(messageId, MessageType.User, (previous) => ({
           ...(previous as IMessage),
           voice: {
+            kind: previous?.voice?.kind ?? 'single',
             ...(previous?.voice ?? {}),
             status: 'failed',
             error: '重试失败',
@@ -860,21 +847,6 @@ export const useSendMessage = (
     addAutoPlayEligibleAssistant,
   ]);
 
-  const hasPendingAssistantVoice = useMemo(
-    () =>
-      derivedMessages.some(
-        (message) =>
-          message.conversationId === conversationId &&
-          message.role === MessageType.Assistant &&
-          message.voice?.status === 'streaming',
-      ),
-    [conversationId, derivedMessages],
-  );
-
-  useEffect(() => {
-    derivedMessagesRef.current = derivedMessages;
-  }, [derivedMessages]);
-
   useEffect(() => {
     const previousConversationId = previousConversationIdRef.current;
     const switchedConversation =
@@ -883,42 +855,12 @@ export const useSendMessage = (
 
     if (switchedConversation || clearedConversation) {
       autoPlayEligibleAssistantIdsRef.current.clear();
-      stopAssistantTtsPolling();
+      abortAssistantVoiceWait();
       setLoadingAssistantId('');
     }
 
     previousConversationIdRef.current = conversationId;
-  }, [conversationId, stopAssistantTtsPolling]);
-
-  useEffect(() => {
-    stopAssistantTtsPolling();
-    if (!conversationId || !hasPendingAssistantVoice) {
-      return;
-    }
-
-    let cancelled = false;
-    const poll = async () => {
-      await pollConversationForAssistantVoice(conversationId);
-      if (cancelled) {
-        return;
-      }
-      ttsPollingTimerRef.current = window.setTimeout(() => {
-        void poll();
-      }, 1500);
-    };
-
-    void poll();
-
-    return () => {
-      cancelled = true;
-      stopAssistantTtsPolling();
-    };
-  }, [
-    conversationId,
-    hasPendingAssistantVoice,
-    pollConversationForAssistantVoice,
-    stopAssistantTtsPolling,
-  ]);
+  }, [abortAssistantVoiceWait, conversationId]);
 
   useEffect(() => {
     const isFinalAnswer = Boolean(answer.final);
@@ -929,7 +871,17 @@ export const useSendMessage = (
     }
 
     //  #1289
-    if (answer.id && answer.audio_binary) {
+    if (
+      answer.id &&
+      (
+        answer.audio_binary ||
+        (answer.voice?.kind === 'segments' &&
+          (answer.voice.segments?.length ?? 0) > 0) ||
+        (answer.voice?.kind === 'single' &&
+          answer.voice.status === 'ready' &&
+          Boolean(answer.voice.file_id))
+      )
+    ) {
       markAssistantVoiceAutoPlay(answer.id);
     }
 
@@ -952,9 +904,9 @@ export const useSendMessage = (
     const eligibleAssistantIds = autoPlayEligibleAssistantIdsRef.current;
     return () => {
       eligibleAssistantIds.clear();
-      stopAssistantTtsPolling();
+      abortAssistantVoiceWait();
     };
-  }, [stopAssistantTtsPolling]);
+  }, [abortAssistantVoiceWait]);
 
   return {
     assistantVoiceAutoPlayNonceMap,

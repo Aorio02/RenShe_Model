@@ -13,10 +13,12 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import asyncio
 import json
 import os
 import re
 import logging
+import time
 from copy import deepcopy
 import tempfile
 from peewee import IntegrityError
@@ -77,9 +79,9 @@ def _merge_latest_voice_state(conv):
             continue
         if message.get("voice"):
             current_voice = message.get("voice") or {}
-            merged_voice = deepcopy(latest_voice)
-            merged_voice.update(current_voice)
-            if current_voice.get("segments"):
+            merged_voice = deepcopy(current_voice)
+            merged_voice.update(deepcopy(latest_voice))
+            if current_voice.get("segments") and not latest_voice.get("segments"):
                 merged_voice["segments"] = current_voice["segments"]
             message["voice"] = merged_voice
         else:
@@ -153,6 +155,201 @@ def _sanitize_conversation_messages(messages, drop_fields):
         _sanitize_conversation_message(message, drop_fields)
         for message in (messages or [])
     ]
+
+
+def _normalize_tts_mime_type(mime_type: str | None, default: str = "audio/mpeg") -> str:
+    if not mime_type:
+        return default
+    return mime_type.split(";", 1)[0].strip().lower() or default
+
+
+def _tts_text_len(text: str) -> int:
+    return len(re.sub(r"\s+", "", text or ""))
+
+
+def _split_failed_tts_segment(text: str) -> list[str]:
+    normalized = (text or "").strip()
+    if _tts_text_len(normalized) < 24:
+        return [normalized] if normalized else []
+
+    midpoint = len(normalized) // 2
+    split_points = []
+    for index, char in enumerate(normalized):
+        if char not in "。！？；，、,.!?;\n":
+            continue
+        left = normalized[: index + 1].strip()
+        right = normalized[index + 1 :].strip()
+        if _tts_text_len(left) < 8 or _tts_text_len(right) < 8:
+            continue
+        split_points.append((abs(index - midpoint), index))
+
+    if split_points:
+        _, split_index = min(split_points)
+        return [
+            normalized[: split_index + 1].strip(),
+            normalized[split_index + 1 :].strip(),
+        ]
+
+    for split_index in range(midpoint, len(normalized)):
+        left = normalized[:split_index].strip()
+        right = normalized[split_index:].strip()
+        if _tts_text_len(left) >= 8 and _tts_text_len(right) >= 8:
+            return [left, right]
+
+    return [normalized] if normalized else []
+
+
+def _split_tts_for_backend(text: str, max_chars: int = 45) -> list[str]:
+    normalized = (text or "").strip()
+    if not normalized:
+        return []
+
+    clauses = []
+    buffer = ""
+    for char in normalized:
+        buffer += char
+        if char in "。！？；，、,.!?;\n":
+            clauses.append(buffer.strip())
+            buffer = ""
+    if buffer.strip():
+        clauses.append(buffer.strip())
+
+    outputs = []
+    current = ""
+    for clause in clauses:
+        if not clause:
+            continue
+
+        if _tts_text_len(clause) > max_chars:
+            if current:
+                outputs.append(current.strip())
+                current = ""
+            parts = _split_failed_tts_segment(clause)
+            if len(parts) <= 1:
+                outputs.append(clause)
+            else:
+                for part in parts:
+                    outputs.extend(_split_tts_for_backend(part, max_chars=max_chars))
+            continue
+
+        candidate = f"{current}{clause}" if current else clause
+        if current and _tts_text_len(candidate) > max_chars:
+            outputs.append(current.strip())
+            current = clause
+        else:
+            current = candidate
+
+    if current:
+        outputs.append(current.strip())
+
+    return [item for item in outputs if item]
+
+
+def _generate_and_persist_tts_segment(
+    *,
+    dialog,
+    user_id: str,
+    conversation_id: str,
+    message_id: str,
+    seq: int,
+    text: str,
+) -> dict:
+    cleaned_text = clean_tts_text(text)
+    if not cleaned_text:
+        raise ValueError("no_readable_content")
+
+    tts_mdl = VoiceChatService._try_build_tts_model(dialog)
+    if not tts_mdl:
+        raise RuntimeError("tts_unavailable")
+
+    audio = bytearray()
+    for chunk in tts_mdl.tts(cleaned_text):
+        if isinstance(chunk, (bytes, bytearray)) and chunk:
+            audio.extend(chunk)
+
+    mime_type = _normalize_tts_mime_type(
+        getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", None),
+    )
+    if not audio:
+        raise RuntimeError("tts_empty")
+
+    segment = VoiceChatService.persist_assistant_tts_segment(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        seq=seq,
+        text=cleaned_text,
+        audio=bytes(audio),
+        mime_type=mime_type,
+        final=False,
+    )
+
+    return {
+        "segment": segment,
+        "mime_type": mime_type,
+    }
+
+
+def _build_segment_voice_answer(
+    *,
+    message_id: str,
+    session_id: str,
+    status: str,
+    mime_type: str | None,
+    final: bool = False,
+    segments: list | None = None,
+    error: str | None = None,
+) -> dict:
+    voice = {
+        "kind": "segments",
+        "status": status,
+        "mime_type": _normalize_tts_mime_type(mime_type),
+        "segments": segments or [],
+    }
+    if error:
+        voice["error"] = error
+
+    return {
+        "answer": "",
+        "reference": {},
+        "audio_binary": None,
+        "audio_mime_type": voice["mime_type"],
+        "prompt": "",
+        "created_at": time.time(),
+        "final": final,
+        "id": message_id,
+        "session_id": session_id,
+        "voice": voice,
+    }
+
+
+def _build_single_voice_answer(
+    *,
+    message: dict,
+    session_id: str,
+    final: bool = False,
+) -> dict | None:
+    voice = _sanitize_voice_payload(message.get("voice"))
+    if not isinstance(voice, dict):
+        return None
+
+    mime_type = _normalize_tts_mime_type(voice.get("mime_type"))
+
+    return {
+        "answer": "",
+        "reference": {},
+        "audio_binary": None,
+        "audio_mime_type": mime_type,
+        "prompt": "",
+        "created_at": message.get("created_at", time.time()),
+        "final": final,
+        "id": message.get("id"),
+        "session_id": session_id,
+        "voice": {
+            **voice,
+            "mime_type": mime_type,
+        },
+    }
 
 
 @manager.route("/set", methods=["POST"])  # noqa: F821
@@ -361,6 +558,7 @@ async def completion():
             return get_data_error_result(message="Dialog not found!")
         del req["conversation_id"]
         del req["messages"]
+        stream_enabled = bool(req.pop("stream", True))
 
         if not conv.reference:
             conv.reference = []
@@ -377,36 +575,167 @@ async def completion():
 
         is_embedded = bool(chat_model_id)
         user_id = current_user.id
+        use_live_single_tts = bool(
+            stream_enabled
+            and defer_tts
+            and dia.prompt_config.get("tts")
+            and message_id
+            and not is_embedded
+        )
+
+        if use_live_single_tts:
+            assistant_placeholder = {
+                "role": "assistant",
+                "content": "",
+                "created_at": time.time(),
+                "id": message_id,
+                "voice": {
+                    "kind": "single",
+                    "status": "streaming",
+                    "mime_type": "audio/mpeg",
+                },
+            }
+            if not conv.message or conv.message[-1].get("role") != "assistant":
+                conv.message.append(assistant_placeholder)
+            else:
+                conv.message[-1] = assistant_placeholder
+            ConversationService.update_by_id(
+                conv.id,
+                {
+                    "message": conv.message,
+                    "reference": conv.reference,
+                },
+            )
+
         async def stream():
             nonlocal dia, msg, req, conv
+
+            def _serialize_sse(payload, code: int = 0, message: str = ""):
+                return "data:" + json.dumps(
+                    {"code": code, "message": message, "data": payload},
+                    ensure_ascii=False,
+                ) + "\n\n"
+
+            if not use_live_single_tts:
+                try:
+                    async for ans in async_chat(dia, msg, True, **req):
+                        ans = structure_answer(conv, ans, message_id, conv.id)
+                        yield _serialize_sse(ans)
+                    if not is_embedded:
+                        _merge_latest_voice_state(conv)
+                        _finalize_live_tts_segments(conv, message_id)
+                        should_enqueue_tts = False
+                        if defer_tts and dia.prompt_config.get("tts") and message_id:
+                            try:
+                                should_enqueue_tts = bool(
+                                    VoiceChatService.prepare_assistant_tts_message(conv, message_id)
+                                )
+                            except Exception as e:
+                                logging.warning("Prepare assistant async TTS failed: %s", e)
+                        ConversationService.update_by_id(conv.id, conv.to_dict())
+                        if should_enqueue_tts:
+                            VoiceChatService.enqueue_assistant_tts_task(
+                                user_id=user_id,
+                                conversation_id=conv.id,
+                                message_id=message_id,
+                            )
+                except Exception as e:
+                    logging.exception(e)
+                    yield _serialize_sse(
+                        {
+                            "answer": "**ERROR**: " + str(e),
+                            "reference": [],
+                        },
+                        code=500,
+                        message=str(e),
+                    )
+                yield _serialize_sse(True)
+                return
+
             try:
                 async for ans in async_chat(dia, msg, True, **req):
-                    ans = structure_answer(conv, ans, message_id, conv.id)
-                    yield "data:" + json.dumps({"code": 0, "message": "", "data": ans}, ensure_ascii=False) + "\n\n"
-                if not is_embedded:
-                    _merge_latest_voice_state(conv)
-                    _finalize_live_tts_segments(conv, message_id)
-                    should_enqueue_tts = False
-                    if defer_tts and dia.prompt_config.get("tts") and message_id:
-                        try:
-                            should_enqueue_tts = bool(
-                                VoiceChatService.prepare_assistant_tts_message(conv, message_id)
-                            )
-                        except Exception as e:
-                            logging.warning("Prepare assistant async TTS failed: %s", e)
-                    ConversationService.update_by_id(conv.id, conv.to_dict())
-                    if should_enqueue_tts:
-                        VoiceChatService.enqueue_assistant_tts_task(
-                            user_id=user_id,
-                            conversation_id=conv.id,
-                            message_id=message_id,
-                        )
+                    structured = structure_answer(conv, ans, message_id, conv.id)
+                    yield _serialize_sse(structured)
             except Exception as e:
                 logging.exception(e)
-                yield "data:" + json.dumps({"code": 500, "message": str(e), "data": {"answer": "**ERROR**: " + str(e), "reference": []}}, ensure_ascii=False) + "\n\n"
-            yield "data:" + json.dumps({"code": 0, "message": "", "data": True}, ensure_ascii=False) + "\n\n"
+                yield _serialize_sse(
+                    {
+                        "answer": "**ERROR**: " + str(e),
+                        "reference": [],
+                    },
+                    code=500,
+                    message=str(e),
+                )
+                yield _serialize_sse(True)
+                return
 
-        if req.get("stream", True):
+            latest_voice_message = None
+            try:
+                cleaned_text = ""
+                if dia.prompt_config.get("tts") and message_id:
+                    cleaned_text = VoiceChatService.prepare_assistant_tts_message(
+                        conv,
+                        message_id,
+                    )
+                ConversationService.update_by_id(
+                    conv.id,
+                    {
+                        "message": conv.message,
+                        "reference": conv.reference,
+                    },
+                )
+
+                if cleaned_text:
+                    VoiceChatService.enqueue_assistant_tts_task(
+                        user_id=user_id,
+                        conversation_id=conv.id,
+                        message_id=message_id,
+                    )
+                    latest_voice_message = await asyncio.to_thread(
+                        VoiceChatService.wait_for_assistant_tts_message,
+                        user_id=user_id,
+                        conversation_id=conv.id,
+                        message_id=message_id,
+                        timeout=180.0,
+                    )
+                else:
+                    latest_voice_message = await asyncio.to_thread(
+                        VoiceChatService.get_assistant_message,
+                        user_id=user_id,
+                        conversation_id=conv.id,
+                        message_id=message_id,
+                    )
+            except Exception:
+                logging.exception(
+                    "Live single TTS failed for %s/%s",
+                    conv.id,
+                    message_id,
+                )
+                try:
+                    latest_voice_message = await asyncio.to_thread(
+                        VoiceChatService.get_assistant_message,
+                        user_id=user_id,
+                        conversation_id=conv.id,
+                        message_id=message_id,
+                    )
+                except Exception:
+                    latest_voice_message = None
+            finally:
+                _merge_latest_voice_state(conv)
+                ConversationService.update_by_id(conv.id, conv.to_dict())
+
+            if latest_voice_message:
+                voice_answer = _build_single_voice_answer(
+                    message=latest_voice_message,
+                    session_id=conv.id,
+                    final=False,
+                )
+                if voice_answer:
+                    yield _serialize_sse(voice_answer)
+
+            yield _serialize_sse(True)
+
+        if stream_enabled:
             resp = Response(stream(), mimetype="text/event-stream")
             resp.headers.add_header("Cache-control", "no-cache")
             resp.headers.add_header("Connection", "keep-alive")
@@ -701,6 +1030,44 @@ async def voice_file():
         resp = Response(blob, mimetype=mime_type)
         resp.headers.add_header("Cache-Control", "no-cache")
         return resp
+    except LookupError as e:
+        return Response(str(e), status=404, mimetype="text/plain")
+    except Exception as e:
+        return server_error_response(e)
+
+
+@manager.route("/wait_assistant_voice", methods=["GET"])  # noqa: F821
+@login_required
+async def wait_assistant_voice():
+    conversation_id = request.args.get("conversation_id", "")
+    message_id = request.args.get("message_id", "")
+    timeout_raw = request.args.get("timeout", "90")
+
+    if not conversation_id or not message_id:
+        return get_data_error_result(message="conversation_id and message_id are required")
+
+    try:
+        timeout = float(timeout_raw)
+    except Exception:
+        timeout = 90.0
+
+    timeout = max(1.0, min(timeout, 180.0))
+
+    try:
+        message = await asyncio.to_thread(
+            VoiceChatService.wait_for_assistant_tts_message,
+            user_id=current_user.id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            timeout=timeout,
+        )
+        sanitized_message = _sanitize_conversation_message(
+            message,
+            _CONVERSATION_RESPONSE_MESSAGE_DROP_FIELDS,
+        )
+        return get_json_result(data={"message": sanitized_message})
+    except LookupError as e:
+        return Response(str(e), status=404, mimetype="text/plain")
     except Exception as e:
         return server_error_response(e)
 

@@ -2,7 +2,7 @@ import copy
 import logging
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
@@ -194,6 +194,12 @@ class VoiceChatService:
     @staticmethod
     def _assistant_tts_task_key(conversation_id: str, message_id: str) -> str:
         return f"{conversation_id}:{message_id}"
+
+    @classmethod
+    def _get_assistant_tts_task(cls, conversation_id: str, message_id: str) -> Future | None:
+        task_key = cls._assistant_tts_task_key(conversation_id, message_id)
+        with cls._assistant_tts_tasks_lock:
+            return cls._assistant_tts_tasks.get(task_key)
 
     @classmethod
     def _set_assistant_voice(
@@ -413,9 +419,9 @@ class VoiceChatService:
         audio: bytes,
         mime_type: str,
         final: bool = False,
-    ) -> None:
+    ) -> dict[str, Any]:
         if not audio:
-            return
+            raise ValueError("audio is required")
 
         conv = cls._load_conversation(conversation_id, user_id)
         idx = _message_index_by_id_and_role(conv, message_id, "assistant")
@@ -463,6 +469,36 @@ class VoiceChatService:
         message["created_at"] = _now_ts()
         conv.message[idx] = message
         _persist_conversation(conv)
+        return segments[-1]
+
+    @classmethod
+    def finalize_assistant_tts_segments(
+        cls,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+    ) -> None:
+        conv = cls._load_conversation(conversation_id, user_id)
+        idx = _message_index_by_id_and_role(conv, message_id, "assistant")
+        if idx < 0:
+            raise LookupError("Assistant message not found!")
+
+        message = conv.message[idx]
+        voice = message.get("voice") or {}
+        if voice.get("kind") != "segments":
+            raise LookupError("Assistant voice segments not found!")
+
+        segments = voice.get("segments") or []
+        if not segments:
+            raise LookupError("Assistant voice segments are empty!")
+
+        voice["status"] = "ready"
+        voice.pop("error", None)
+        message["voice"] = voice
+        message["created_at"] = _now_ts()
+        conv.message[idx] = message
+        _persist_conversation(conv)
 
     @staticmethod
     def _load_conversation(conversation_id: str, user_id: str):
@@ -479,6 +515,74 @@ class VoiceChatService:
         if not ok or not dialog:
             raise LookupError("Dialog not found!")
         return dialog
+
+    @classmethod
+    def get_assistant_message(
+        cls,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+    ) -> dict[str, Any]:
+        conv = cls._load_conversation(conversation_id, user_id)
+        idx = _message_index_by_id_and_role(conv, message_id, "assistant")
+        if idx < 0:
+            raise LookupError("Assistant message not found!")
+        return _clone_message(conv.message[idx])
+
+    @classmethod
+    def wait_for_assistant_tts_message(
+        cls,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        timeout: float = 90.0,
+    ) -> dict[str, Any]:
+        timeout = max(float(timeout or 0), 0.0)
+        deadline = time.monotonic() + timeout
+
+        while True:
+            message = cls.get_assistant_message(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
+            voice = message.get("voice") or {}
+            status = voice.get("status")
+            if (
+                voice.get("kind") != "single"
+                or status in {"ready", "failed"}
+                or voice.get("file_id")
+                or voice.get("error")
+            ):
+                return message
+
+            future = cls._get_assistant_tts_task(conversation_id, message_id)
+            if future is not None:
+                remaining = max(deadline - time.monotonic(), 0.0)
+                if remaining <= 0:
+                    return message
+                try:
+                    future.result(timeout=remaining)
+                except FutureTimeoutError:
+                    return cls.get_assistant_message(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                    )
+                except Exception:
+                    return cls.get_assistant_message(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                    )
+                continue
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return message
+            time.sleep(min(0.2, remaining))
 
     @staticmethod
     def _try_build_tts_model(dialog):
@@ -809,6 +913,12 @@ class VoiceChatService:
 
         segments = voice.get("segments") or []
         if seq is None:
+            if len(segments) == 1:
+                segment = segments[0]
+                return (
+                    VoiceStorageService.get_blob(conv.user_id or user_id, segment["file_id"]),
+                    segment.get("mime_type", "audio/mpeg"),
+                )
             raise LookupError("Segment seq is required")
         segment = next((item for item in segments if int(item.get("seq", -1)) == int(seq)), None)
         if not segment:

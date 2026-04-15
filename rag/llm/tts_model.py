@@ -19,6 +19,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import queue
 import re
 import ssl
@@ -195,6 +196,14 @@ class OpenAITTS(Base):
         self.base_url = base_url
         self.last_mime_type = "audio/mpeg"
         self.headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        try:
+            self.connect_timeout = float(os.environ.get("RAGFLOW_TTS_CONNECT_TIMEOUT", 10))
+        except Exception:
+            self.connect_timeout = 10.0
+        try:
+            self.read_timeout = float(os.environ.get("RAGFLOW_TTS_READ_TIMEOUT", 20))
+        except Exception:
+            self.read_timeout = 20.0
 
     def _build_payload(self, text, voice=None, response_format=None):
         payload = {"model": self.model_name, "input": text}
@@ -215,7 +224,13 @@ class OpenAITTS(Base):
 
         last_error = None
         for payload in payloads:
-            response = requests.post(f"{self.base_url}/audio/speech", headers=self.headers, json=payload, stream=True)
+            response = requests.post(
+                f"{self.base_url}/audio/speech",
+                headers=self.headers,
+                json=payload,
+                stream=True,
+                timeout=(self.connect_timeout, self.read_timeout),
+            )
             try:
                 self.last_mime_type = self.normalize_content_type(
                     response.headers.get("Content-Type"),

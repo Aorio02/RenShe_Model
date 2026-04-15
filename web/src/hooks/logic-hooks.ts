@@ -256,7 +256,18 @@ export const useSendMessageWithSse = (
           signal: controller?.signal || sseRef.current?.signal,
         });
 
-        const res = response.clone().json();
+        const contentType =
+          response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() ||
+          '';
+        const isJsonResponse = contentType.includes('json');
+        const res = isJsonResponse
+          ? response.clone().json()
+          : Promise.resolve({
+              code: response.ok ? 0 : response.status,
+              data: true,
+              message: '',
+              status: response.status,
+            } as ResponseType);
 
         const reader = response?.body
           ?.pipeThrough(new TextDecoderStream())
@@ -497,14 +508,51 @@ const mergeStreamingVoice = (
   answer: IAnswer,
 ): IVoiceMeta | undefined => {
   if (answer.voice) {
+    if (answer.voice.kind === 'segments') {
+      const previousSegments =
+        previousVoice?.kind === 'segments' ? previousVoice.segments ?? [] : [];
+      const incomingSegments = answer.voice.segments ?? [];
+      const mergedSegmentsMap = new Map<number, (typeof previousSegments)[number]>();
+
+      previousSegments.forEach((segment) => {
+        mergedSegmentsMap.set(segment.seq, segment);
+      });
+      incomingSegments.forEach((segment) => {
+        const previousSegment = mergedSegmentsMap.get(segment.seq);
+        mergedSegmentsMap.set(segment.seq, {
+          ...(previousSegment ?? {}),
+          ...segment,
+          object_url: segment.file_id
+            ? undefined
+            : segment.object_url ?? previousSegment?.object_url,
+        });
+      });
+
+      return {
+        ...(previousVoice?.kind === 'segments' ? previousVoice : {}),
+        ...answer.voice,
+        kind: 'segments',
+        file_id: undefined,
+        local_url: undefined,
+        mime_type: answer.voice.mime_type ?? previousVoice?.mime_type,
+        segments: [...mergedSegmentsMap.values()].sort(
+          (left, right) => left.seq - right.seq,
+        ),
+      };
+    }
+
     if (
       previousVoice?.kind === 'segments' &&
       (previousVoice.segments?.length ?? 0) > 0
     ) {
       return {
         ...previousVoice,
-        status: answer.final ? 'ready' : previousVoice.status,
-        file_id: answer.voice.file_id ?? previousVoice.file_id,
+        status:
+          answer.final && previousVoice.status !== 'failed'
+            ? 'ready'
+            : previousVoice.status,
+        file_id: undefined,
+        local_url: undefined,
         mime_type: answer.voice.mime_type ?? previousVoice.mime_type,
         duration_ms: answer.voice.duration_ms ?? previousVoice.duration_ms,
       };
@@ -515,7 +563,11 @@ const mergeStreamingVoice = (
   if (previousVoice?.kind === 'segments' && answer.final) {
     return {
       ...previousVoice,
-      status: 'ready',
+      status:
+        previousVoice.status !== 'failed' &&
+        (previousVoice.segments?.length ?? 0) > 0
+          ? 'ready'
+          : previousVoice.status,
       mime_type: answer.audio_mime_type ?? previousVoice.mime_type,
     };
   }
@@ -628,14 +680,16 @@ export const useSelectDerivedMessages = () => {
         ...(previousMessage ?? {}),
         role: MessageType.Assistant,
         content: answer.answer,
-        reference: answer.reference,
         id: buildMessageUuid({
           id: answer.id,
           role: MessageType.Assistant,
         }),
-        prompt: answer.prompt,
-        audio_binary: answer.audio_binary,
         ...omit(answer, 'reference'),
+        reference: isEmpty(answer.reference)
+          ? previousMessage?.reference
+          : answer.reference,
+        prompt: answer.prompt ?? previousMessage?.prompt,
+        audio_binary: answer.audio_binary ?? previousMessage?.audio_binary,
         voice: mergeStreamingVoice(previousMessage?.voice, answer),
       };
 
@@ -661,6 +715,9 @@ export const useSelectDerivedMessages = () => {
               ...x,
               ...answer,
               content: answer.answer,
+              reference: isEmpty(answer.reference)
+                ? x.reference
+                : answer.reference,
               voice: mergeStreamingVoice(x.voice, answer),
             };
           }
@@ -673,7 +730,6 @@ export const useSelectDerivedMessages = () => {
         {
           role: MessageType.Assistant,
           content: answer.answer,
-          reference: answer.reference,
           id: buildMessageUuid({
             id: answer.id,
             role: MessageType.Assistant,
@@ -681,6 +737,7 @@ export const useSelectDerivedMessages = () => {
           prompt: answer.prompt,
           audio_binary: answer.audio_binary,
           ...omit(answer, 'reference'),
+          reference: answer.reference,
           voice: mergeStreamingVoice(undefined, answer),
         },
       ];
