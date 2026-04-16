@@ -26,7 +26,7 @@ const Dashboard = () => {
     // 在这里写你的管理员邮箱！
     // ======================
     const userInfo = JSON.parse(userInfoStr);
-    const adminEmails = ['1223086775@qq.com']; // 👈 你的管理员账号
+    const adminEmails = ['1223086775@qq.com', 'RenShe@qq.com'];
     setIsAdmin(adminEmails.includes(userInfo.email));
 
     setIsChecking(false);

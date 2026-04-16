@@ -182,7 +182,7 @@ const Login = () => {
                 className="size-8 mr-[12] cursor-pointer"
               />
             </div>
-            <div className="text-xl font-bold self-center">RAGFlow</div>
+            <div className="text-xl font-bold self-center">人社智能问答系统</div>
           </div>
           {/* <h1 className="text-[36px] font-medium  text-center mb-2">
             {t('title')}

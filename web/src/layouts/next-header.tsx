@@ -55,7 +55,7 @@ export function Header() {
     const userInfoStr = localStorage.getItem('userInfo');
     if (userInfoStr) {
       const userInfo = JSON.parse(userInfoStr);
-      const adminEmails = ['1223086775@qq.com'];
+      const adminEmails = ['1223086775@qq.com', 'RenShe@qq.com'];
       setIsAdmin(adminEmails.includes(userInfo.email));
     }
   }, []);
