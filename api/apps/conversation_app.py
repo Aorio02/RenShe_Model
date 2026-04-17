@@ -556,6 +556,7 @@ async def completion():
         e, dia = DialogService.get_by_id(conv.dialog_id)
         if not e:
             return get_data_error_result(message="Dialog not found!")
+        model_tenant_id = UserTenantService.get_tenant_id_by_user_id(current_user.id)
         del req["conversation_id"]
         del req["messages"]
         stream_enabled = bool(req.pop("stream", True))
@@ -566,7 +567,7 @@ async def completion():
         conv.reference.append({"chunks": [], "doc_aggs": []})
 
         if chat_model_id:
-            if not TenantLLMService.get_api_key(tenant_id=dia.tenant_id, model_name=chat_model_id):
+            if not TenantLLMService.get_api_key(tenant_id=model_tenant_id, model_name=chat_model_id):
                 req.pop("chat_model_id", None)
                 req.pop("chat_model_config", None)
                 return get_data_error_result(message=f"Cannot use specified model {chat_model_id}.")
@@ -608,7 +609,7 @@ async def completion():
             )
 
         async def stream():
-            nonlocal dia, msg, req, conv
+            nonlocal dia, msg, req, conv, model_tenant_id
 
             def _serialize_sse(payload, code: int = 0, message: str = ""):
                 return "data:" + json.dumps(
@@ -618,7 +619,7 @@ async def completion():
 
             if not use_live_single_tts:
                 try:
-                    async for ans in async_chat(dia, msg, True, **req):
+                    async for ans in async_chat(dia, msg, True, model_tenant_id=model_tenant_id, **req):
                         ans = structure_answer(conv, ans, message_id, conv.id)
                         yield _serialize_sse(ans)
                     if not is_embedded:
@@ -653,7 +654,7 @@ async def completion():
                 return
 
             try:
-                async for ans in async_chat(dia, msg, True, **req):
+                async for ans in async_chat(dia, msg, True, model_tenant_id=model_tenant_id, **req):
                     structured = structure_answer(conv, ans, message_id, conv.id)
                     yield _serialize_sse(structured)
             except Exception as e:
@@ -745,7 +746,7 @@ async def completion():
 
         else:
             answer = None
-            async for ans in async_chat(dia, msg, **req):
+            async for ans in async_chat(dia, msg, model_tenant_id=model_tenant_id, **req):
                 answer = structure_answer(conv, ans, message_id, conv.id)
                 if not is_embedded:
                     should_enqueue_tts = False

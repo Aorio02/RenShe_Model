@@ -21,6 +21,7 @@ from common.constants import StatusEnum
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.user_service import TenantService, UserTenantService
+from api.db import UserTenantRole
 from api.utils.api_utils import get_data_error_result, get_json_result, get_request_json, server_error_response, validate_request
 from common.misc_utils import get_uuid
 from common.constants import RetCode
@@ -79,7 +80,13 @@ async def set_dialog():
                 message="Parameter '{}' is not used".format(p["key"]))
 
     try:
-        e, tenant = TenantService.get_by_id(current_user.id)
+        tenant_id = UserTenantService.get_tenant_id_by_user_id(current_user.id)
+        user_role = UserTenantService.get_user_role_in_tenant(current_user.id, tenant_id)
+        if user_role == UserTenantRole.OWNER:
+            dialog_tenant_id = tenant_id
+        else:
+            dialog_tenant_id = current_user.id
+        e, tenant = TenantService.get_by_id(tenant_id)
         if not e:
             return get_data_error_result(message="Tenant not found!")
         kbs = KnowledgebaseService.get_by_ids(req.get("kb_ids", []))
@@ -88,11 +95,11 @@ async def set_dialog():
         if embd_count > 1:
             return get_data_error_result(message=f'Datasets use different embedding models: {[kb.embd_id for kb in kbs]}"')
 
-        llm_id = req.get("llm_id", tenant.llm_id)
+        llm_id = req.get("llm_id") or tenant.llm_id
         if not dialog_id:
             dia = {
                 "id": get_uuid(),
-                "tenant_id": current_user.id,
+                "tenant_id": dialog_tenant_id,
                 "name": name,
                 "kb_ids": req.get("kb_ids", []),
                 "description": description,
@@ -158,8 +165,14 @@ def get_kb_names(kb_ids):
 @login_required
 def list_dialogs():
     try:
+        tenant_id = UserTenantService.get_tenant_id_by_user_id(current_user.id)
+        user_role = UserTenantService.get_user_role_in_tenant(current_user.id, tenant_id)
+        if user_role == UserTenantRole.OWNER:
+            list_tenant_id = tenant_id
+        else:
+            list_tenant_id = current_user.id
         conversations = DialogService.query(
-            tenant_id=current_user.id,
+            tenant_id=list_tenant_id,
             status=StatusEnum.VALID.value,
             reverse=True,
             order_by=DialogService.model.create_time)

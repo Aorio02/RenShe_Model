@@ -395,19 +395,20 @@ class DialogService(CommonService):
         return res
 
 
-async def async_chat_solo(dialog, messages, stream=True, enable_tts=True):
+async def async_chat_solo(dialog, messages, stream=True, enable_tts=True, model_tenant_id=None):
     attachments = ""
     if "files" in messages[-1]:
         attachments = "\n\n".join(FileService.get_files(messages[-1]["files"]))
+    tenant_id_for_model = model_tenant_id if model_tenant_id else dialog.tenant_id
     if TenantLLMService.llm_id2llm_type(dialog.llm_id) == "image2text":
-        chat_mdl = LLMBundle(dialog.tenant_id, LLMType.IMAGE2TEXT, dialog.llm_id)
+        chat_mdl = LLMBundle(tenant_id_for_model, LLMType.IMAGE2TEXT, dialog.llm_id)
     else:
-        chat_mdl = LLMBundle(dialog.tenant_id, LLMType.CHAT, dialog.llm_id)
+        chat_mdl = LLMBundle(tenant_id_for_model, LLMType.CHAT, dialog.llm_id)
 
     prompt_config = dialog.prompt_config
     tts_mdl = None
     if enable_tts and prompt_config.get("tts"):
-        tts_mdl = LLMBundle(dialog.tenant_id, LLMType.TTS)
+        tts_mdl = LLMBundle(tenant_id_for_model, LLMType.TTS)
     msg = [{"role": m["role"], "content": re.sub(r"##\d+\$\$", "", m["content"])} for m in messages if m["role"] != "system"]
     if attachments and msg:
         msg[-1]["content"] += attachments
@@ -476,28 +477,29 @@ async def async_chat_solo(dialog, messages, stream=True, enable_tts=True):
         }
 
 
-def get_models(dialog, enable_tts=True):
+def get_models(dialog, enable_tts=True, model_tenant_id=None):
     embd_mdl, chat_mdl, rerank_mdl, tts_mdl = None, None, None, None
+    tenant_id_for_model = model_tenant_id if model_tenant_id else dialog.tenant_id
     kbs = KnowledgebaseService.get_by_ids(dialog.kb_ids)
     embedding_list = list(set([kb.embd_id for kb in kbs]))
     if len(embedding_list) > 1:
         raise Exception("**ERROR**: Knowledge bases use different embedding models.")
 
     if embedding_list:
-        embd_mdl = LLMBundle(dialog.tenant_id, LLMType.EMBEDDING, embedding_list[0])
+        embd_mdl = LLMBundle(tenant_id_for_model, LLMType.EMBEDDING, embedding_list[0])
         if not embd_mdl:
             raise LookupError("Embedding model(%s) not found" % embedding_list[0])
 
     if TenantLLMService.llm_id2llm_type(dialog.llm_id) == "image2text":
-        chat_mdl = LLMBundle(dialog.tenant_id, LLMType.IMAGE2TEXT, dialog.llm_id)
+        chat_mdl = LLMBundle(tenant_id_for_model, LLMType.IMAGE2TEXT, dialog.llm_id)
     else:
-        chat_mdl = LLMBundle(dialog.tenant_id, LLMType.CHAT, dialog.llm_id)
+        chat_mdl = LLMBundle(tenant_id_for_model, LLMType.CHAT, dialog.llm_id)
 
     if dialog.rerank_id:
-        rerank_mdl = LLMBundle(dialog.tenant_id, LLMType.RERANK, dialog.rerank_id)
+        rerank_mdl = LLMBundle(tenant_id_for_model, LLMType.RERANK, dialog.rerank_id)
 
     if enable_tts and dialog.prompt_config.get("tts"):
-        tts_mdl = LLMBundle(dialog.tenant_id, LLMType.TTS)
+        tts_mdl = LLMBundle(tenant_id_for_model, LLMType.TTS)
     return kbs, embd_mdl, rerank_mdl, chat_mdl, tts_mdl
 
 
@@ -582,21 +584,22 @@ def _split_tts_buffer(buffer: str, last_flush_at: float, force: bool = False) ->
     return outputs, buffer
 
 
-async def async_chat(dialog, messages, stream=True, **kwargs):
+async def async_chat(dialog, messages, stream=True, model_tenant_id=None, **kwargs):
     live_tts = kwargs.pop("live_tts", False)
     enable_tts = kwargs.pop("enable_tts", True) and not live_tts
+    tenant_id_for_model = model_tenant_id if model_tenant_id else dialog.tenant_id
     assert messages[-1]["role"] == "user", "The last content of this conversation is not from user."
     if not dialog.kb_ids and not dialog.prompt_config.get("tavily_api_key"):
-        async for ans in async_chat_solo(dialog, messages, stream, enable_tts=enable_tts):
+        async for ans in async_chat_solo(dialog, messages, stream, enable_tts=enable_tts, model_tenant_id=tenant_id_for_model):
             yield ans
         return
 
     chat_start_ts = timer()
 
     if TenantLLMService.llm_id2llm_type(dialog.llm_id) == "image2text":
-        llm_model_config = TenantLLMService.get_model_config(dialog.tenant_id, LLMType.IMAGE2TEXT, dialog.llm_id)
+        llm_model_config = TenantLLMService.get_model_config(tenant_id_for_model, LLMType.IMAGE2TEXT, dialog.llm_id)
     else:
-        llm_model_config = TenantLLMService.get_model_config(dialog.tenant_id, LLMType.CHAT, dialog.llm_id)
+        llm_model_config = TenantLLMService.get_model_config(tenant_id_for_model, LLMType.CHAT, dialog.llm_id)
 
     max_tokens = llm_model_config.get("max_tokens", 8192)
 
@@ -617,7 +620,7 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
             pass
 
     check_langfuse_tracer_ts = timer()
-    kbs, embd_mdl, rerank_mdl, chat_mdl, tts_mdl = get_models(dialog, enable_tts=enable_tts)
+    kbs, embd_mdl, rerank_mdl, chat_mdl, tts_mdl = get_models(dialog, enable_tts=enable_tts, model_tenant_id=tenant_id_for_model)
     toolcall_session, tools = kwargs.get("toolcall_session"), kwargs.get("tools")
     if toolcall_session and tools:
         chat_mdl.bind_tools(toolcall_session, tools)

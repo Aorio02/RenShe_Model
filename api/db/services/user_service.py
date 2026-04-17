@@ -249,6 +249,35 @@ class UserTenantService(CommonService):
 
     @classmethod
     @DB.connection_context()
+    def get_tenant_id_by_user_id(cls, user_id):
+        try:
+            user_tenants = list(cls.model.select(cls.model.tenant_id, cls.model.role).where(
+                (cls.model.user_id == user_id) & (cls.model.status == StatusEnum.VALID.value)
+            ))
+            if not user_tenants:
+                return user_id
+            for ut in user_tenants:
+                if ut.role != UserTenantRole.OWNER:
+                    return ut.tenant_id
+            return user_tenants[0].tenant_id
+        except peewee.DoesNotExist:
+            return user_id
+
+    @classmethod
+    @DB.connection_context()
+    def get_user_role_in_tenant(cls, user_id, tenant_id):
+        try:
+            user_tenant = cls.model.select(cls.model.role).where(
+                (cls.model.user_id == user_id) & (cls.model.tenant_id == tenant_id) & (cls.model.status == StatusEnum.VALID.value)
+            ).first()
+            if user_tenant:
+                return user_tenant.role
+            return None
+        except peewee.DoesNotExist:
+            return None
+
+    @classmethod
+    @DB.connection_context()
     def save(cls, **kwargs):
         if "id" not in kwargs:
             kwargs["id"] = get_uuid()
