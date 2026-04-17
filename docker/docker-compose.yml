@@ -43,6 +43,7 @@ services:
       - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template
       - ./entrypoint.sh:/ragflow/entrypoint.sh
       - ../api:/ragflow/api:rw
+      - ../common:/ragflow/common:rw
       - ../docs:/ragflow/docs:rw
       - ../rag:/ragflow/rag:rw
       - ../web:/ragflow/web:rw
@@ -98,6 +99,7 @@ services:
       - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template
       - ./entrypoint.sh:/ragflow/entrypoint.sh
       - ../api:/ragflow/api:rw
+      - ../common:/ragflow/common:rw
       - ../docs:/ragflow/docs:rw
       - ../rag:/ragflow/rag:rw
       - ../web:/ragflow/web:rw

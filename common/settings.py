@@ -50,6 +50,7 @@ EMBEDDING_MDL = ""
 RERANK_MDL = ""
 ASR_MDL = ""
 IMAGE2TEXT_MDL = ""
+TTS_MDL = ""
 
 
 CHAT_CFG = ""
@@ -57,6 +58,7 @@ EMBEDDING_CFG = ""
 RERANK_CFG = ""
 ASR_CFG = ""
 IMAGE2TEXT_CFG = ""
+TTS_CFG = ""
 API_KEY = None
 PARSERS = None
 HOST_IP = None
@@ -199,19 +201,21 @@ def init_settings():
         "parsers", "naive:General,qa:Q&A,resume:Resume,manual:Manual,table:Table,paper:Paper,book:Book,laws:Laws,presentation:Presentation,picture:Picture,one:One,audio:Audio,email:Email,tag:Tag"
     )
 
-    global CHAT_MDL, EMBEDDING_MDL, RERANK_MDL, ASR_MDL, IMAGE2TEXT_MDL
+    global CHAT_MDL, EMBEDDING_MDL, RERANK_MDL, ASR_MDL, IMAGE2TEXT_MDL, TTS_MDL
     chat_entry = _parse_model_entry(llm_default_models.get("chat_model", CHAT_MDL))
     embedding_entry = _parse_model_entry(llm_default_models.get("embedding_model", EMBEDDING_MDL))
     rerank_entry = _parse_model_entry(llm_default_models.get("rerank_model", RERANK_MDL))
     asr_entry = _parse_model_entry(llm_default_models.get("asr_model", ASR_MDL))
     image2text_entry = _parse_model_entry(llm_default_models.get("image2text_model", IMAGE2TEXT_MDL))
+    tts_entry = _parse_model_entry(llm_default_models.get("tts_model", TTS_MDL))
 
-    global CHAT_CFG, EMBEDDING_CFG, RERANK_CFG, ASR_CFG, IMAGE2TEXT_CFG
+    global CHAT_CFG, EMBEDDING_CFG, RERANK_CFG, ASR_CFG, IMAGE2TEXT_CFG, TTS_CFG
     CHAT_CFG = _resolve_per_model_config(chat_entry, LLM_FACTORY, API_KEY, LLM_BASE_URL)
     EMBEDDING_CFG = _resolve_per_model_config(embedding_entry, LLM_FACTORY, API_KEY, LLM_BASE_URL)
     RERANK_CFG = _resolve_per_model_config(rerank_entry, LLM_FACTORY, API_KEY, LLM_BASE_URL)
     ASR_CFG = _resolve_per_model_config(asr_entry, LLM_FACTORY, API_KEY, LLM_BASE_URL)
     IMAGE2TEXT_CFG = _resolve_per_model_config(image2text_entry, LLM_FACTORY, API_KEY, LLM_BASE_URL)
+    TTS_CFG = _resolve_per_model_config(tts_entry, LLM_FACTORY, API_KEY, LLM_BASE_URL)
 
     CHAT_MDL = CHAT_CFG.get("model", "") or ""
     EMBEDDING_MDL = EMBEDDING_CFG.get("model", "") or ""
@@ -221,6 +225,7 @@ def init_settings():
     RERANK_MDL = RERANK_CFG.get("model", "") or ""
     ASR_MDL = ASR_CFG.get("model", "") or ""
     IMAGE2TEXT_MDL = IMAGE2TEXT_CFG.get("model", "") or ""
+    TTS_MDL = TTS_CFG.get("model", "") or ""
 
     global HOST_IP, HOST_PORT
     HOST_IP = get_base_config(RAG_FLOW_SERVICE_NAME, {}).get("host", "127.0.0.1")
@@ -380,4 +385,3 @@ def _resolve_per_model_config(entry_dict, backup_factory, backup_api_key, backup
 def print_rag_settings():
     logging.info(f"MAX_CONTENT_LENGTH: {DOC_MAXIMUM_SIZE}")
     logging.info(f"MAX_FILE_COUNT_PER_USER: {int(os.environ.get('MAX_FILE_NUM_PER_USER', 0))}")
-

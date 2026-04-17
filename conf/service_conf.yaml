@@ -50,6 +50,11 @@ user_default_llm:
     embedding_model:
       api_key: 'xxx'
       base_url: 'http://localhost:6380'
+    tts_model:
+      name: 'BUPT-TTS___OpenAI-API'
+      factory: 'OpenAI-API-Compatible'
+      api_key: 'x'
+      base_url: 'http://127.0.0.1:8010/v1'
 # postgres:
 #   name: 'rag_flow'
 #   user: 'rag_flow'

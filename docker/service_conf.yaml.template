@@ -48,6 +48,11 @@ user_default_llm:
     embedding_model:
       api_key: 'xxx'
       base_url: 'http://${TEI_HOST}:80'
+    tts_model:
+      name: '${TTS_MODEL_NAME:-BUPT-TTS___OpenAI-API}'
+      factory: '${TTS_MODEL_FACTORY:-OpenAI-API-Compatible}'
+      api_key: '${TTS_API_KEY:-x}'
+      base_url: '${TTS_BASE_URL:-http://host.docker.internal:8010/v1}'
 # postgres:
 #   name: '${POSTGRES_DBNAME:-rag_flow}'
 #   user: '${POSTGRES_USER:-rag_flow}'

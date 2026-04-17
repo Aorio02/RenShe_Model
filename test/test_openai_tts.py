@@ -18,7 +18,7 @@ class DummyResponse:
         self.headers = headers or {}
         self._chunks = chunks or []
 
-    def iter_content(self):
+    def iter_content(self, chunk_size=None):
         yield from self._chunks
 
     def close(self):
@@ -34,7 +34,7 @@ def test_openai_tts_retries_without_voice(monkeypatch):
         ]
     )
 
-    def fake_post(url, headers, json, stream):
+    def fake_post(url, headers, json, stream, timeout=None):
         calls.append({"url": url, "headers": headers, "json": json, "stream": stream})
         return next(responses)
 
@@ -44,7 +44,7 @@ def test_openai_tts_retries_without_voice(monkeypatch):
     assert list(mdl.tts("hello")) == [b"abc"]
     assert mdl.last_mime_type == "audio/wav"
     assert len(calls) == 2
-    assert calls[0]["json"]["voice"] == "alloy"
+    assert calls[0]["json"]["voice"] == "vivian"
     assert "voice" not in calls[1]["json"]
 
 
@@ -53,10 +53,12 @@ def test_openai_tts_raises_runtime_error_after_retry(monkeypatch):
         [
             DummyResponse(500, "first failure", {"Content-Type": "text/plain"}),
             DummyResponse(400, "second failure", {"Content-Type": "application/json"}),
+            DummyResponse(400, "second failure", {"Content-Type": "application/json"}),
+            DummyResponse(400, "second failure", {"Content-Type": "application/json"}),
         ]
     )
 
-    def fake_post(url, headers, json, stream):
+    def fake_post(url, headers, json, stream, timeout=None):
         return next(responses)
 
     monkeypatch.setattr(_MODULE.requests, "post", fake_post)

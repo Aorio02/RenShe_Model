@@ -852,11 +852,11 @@ async def tts():
     if not tenants:
         return get_data_error_result(message="Tenant not found!")
 
-    tts_id = tenants[0]["tts_id"]
-    if not tts_id:
-        return get_data_error_result(message="No default TTS model is set")
-
-    tts_mdl = LLMBundle(tenants[0]["tenant_id"], LLMType.TTS, tts_id)
+    try:
+        tts_mdl = LLMBundle(tenants[0]["tenant_id"], LLMType.TTS)
+    except Exception as e:
+        logging.warning("Live TTS model init failed: %s", e)
+        return get_data_error_result(message="TTS service is not configured")
 
     mime_type = getattr(getattr(tts_mdl, "mdl", None), "last_mime_type", "audio/mpeg")
     mime_type = (mime_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"

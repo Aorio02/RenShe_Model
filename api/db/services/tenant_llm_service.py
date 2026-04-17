@@ -37,6 +37,8 @@ class TenantLLMService(CommonService):
     @classmethod
     @DB.connection_context()
     def get_api_key(cls, tenant_id, model_name):
+        if not model_name:
+            return None
         mdlnm, fid = TenantLLMService.split_model_name_and_factory(model_name)
         if not fid:
             objs = cls.query(tenant_id=tenant_id, llm_name=mdlnm)
@@ -67,6 +69,8 @@ class TenantLLMService(CommonService):
 
     @staticmethod
     def split_model_name_and_factory(model_name):
+        if not model_name:
+            return "", None
         arr = model_name.split("@")
         if len(arr) < 2:
             return model_name, None
@@ -85,6 +89,36 @@ class TenantLLMService(CommonService):
         return model_name, None
 
     @classmethod
+    def get_system_tts_model_config(cls):
+        model_name = (settings.TTS_MDL or "").strip()
+        if not model_name:
+            return None
+
+        tts_cfg = settings.TTS_CFG if isinstance(settings.TTS_CFG, dict) else {}
+        llm_name, llm_factory = cls.split_model_name_and_factory(model_name)
+        llm_factory = llm_factory or (tts_cfg.get("factory", "") or "").strip()
+        if not llm_name or not llm_factory:
+            return None
+
+        return {
+            "llm_factory": llm_factory,
+            "api_key": tts_cfg.get("api_key", "") or "",
+            "llm_name": llm_name,
+            "api_base": tts_cfg.get("base_url", "") or "",
+        }
+
+    @classmethod
+    def resolve_default_tts_model_name(cls, tenant_id, tenant, llm_name=None):
+        if llm_name:
+            return llm_name
+
+        tenant_tts_id = (tenant.tts_id or "").strip()
+        if tenant_tts_id and cls.get_api_key(tenant_id, tenant_tts_id):
+            return tenant_tts_id
+
+        return (settings.TTS_MDL or "").strip()
+
+    @classmethod
     @DB.connection_context()
     def get_model_config(cls, tenant_id, llm_type, llm_name=None):
         from api.db.services.llm_service import LLMService
@@ -92,6 +126,8 @@ class TenantLLMService(CommonService):
         e, tenant = TenantService.get_by_id(tenant_id)
         if not e:
             raise LookupError("Tenant not found")
+
+        requested_llm_name = llm_name
 
         if llm_type == LLMType.EMBEDDING.value:
             mdlnm = tenant.embd_id if not llm_name else llm_name
@@ -104,7 +140,7 @@ class TenantLLMService(CommonService):
         elif llm_type == LLMType.RERANK:
             mdlnm = tenant.rerank_id if not llm_name else llm_name
         elif llm_type == LLMType.TTS:
-            mdlnm = tenant.tts_id if not llm_name else llm_name
+            mdlnm = cls.resolve_default_tts_model_name(tenant_id, tenant, llm_name)
         elif llm_type == LLMType.OCR:
             if not llm_name:
                 raise LookupError("OCR model name is required")
@@ -118,6 +154,11 @@ class TenantLLMService(CommonService):
             model_config = cls.get_api_key(tenant_id, mdlnm)
         if model_config:
             model_config = model_config.to_dict()
+        elif llm_type == LLMType.TTS and not requested_llm_name:
+            model_config = cls.get_system_tts_model_config()
+            if model_config:
+                mdlnm = model_config["llm_name"]
+                fid = model_config["llm_factory"]
         elif llm_type == LLMType.EMBEDDING and fid == "Builtin" and "tei-" in os.getenv("COMPOSE_PROFILES", "") and mdlnm == os.getenv("TEI_MODEL", ""):
             embedding_cfg = settings.EMBEDDING_CFG
             model_config = {"llm_factory": "Builtin", "api_key": embedding_cfg["api_key"], "llm_name": mdlnm, "api_base": embedding_cfg["base_url"]}
@@ -195,7 +236,7 @@ class TenantLLMService(CommonService):
             LLMType.IMAGE2TEXT.value: tenant.img2txt_id,
             LLMType.CHAT.value: tenant.llm_id if not llm_name else llm_name,
             LLMType.RERANK.value: tenant.rerank_id if not llm_name else llm_name,
-            LLMType.TTS.value: tenant.tts_id if not llm_name else llm_name,
+            LLMType.TTS.value: cls.resolve_default_tts_model_name(tenant_id, tenant, llm_name),
             LLMType.OCR.value: llm_name,
         }
 
@@ -215,6 +256,11 @@ class TenantLLMService(CommonService):
         except Exception:
             logging.exception("TenantLLMService.increase_usage got exception,Failed to update used_tokens for tenant_id=%s, llm_name=%s", tenant_id, llm_name)
             return 0
+
+        if num == 0 and llm_type == LLMType.TTS.value:
+            system_tts = cls.get_system_tts_model_config()
+            if system_tts and system_tts["llm_name"] == llm_name and system_tts["llm_factory"] == llm_factory:
+                return 1
 
         return num
 
