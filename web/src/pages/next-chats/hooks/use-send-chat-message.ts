@@ -524,6 +524,16 @@ export const useSendMessage = (
         setLoadingAssistantId((previous) =>
           previous === message.id ? '' : previous,
         );
+        if (
+          message.id &&
+          message.voice?.kind === 'single' &&
+          message.voice.status === 'streaming'
+        ) {
+          void waitForAssistantVoice({
+            targetConversationId,
+            messageId: message.id,
+          });
+        }
         return;
       }
 
@@ -578,6 +588,7 @@ export const useSendMessage = (
       markAssistantVoiceAutoPlay,
       removeAutoPlayEligibleAssistant,
       upsertMessage,
+      waitForAssistantVoice,
     ],
   );
 
