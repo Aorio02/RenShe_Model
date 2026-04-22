@@ -31,7 +31,7 @@ from api.db.services.llm_service import LLMBundle
 from api.db.services.search_service import SearchService
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.user_service import TenantService, UserTenantService
-from api.db.services.voice_chat_service import VoiceChatService
+from api.db.services.voice_chat_service import VoiceChatService, split_answer_for_pseudo_stream
 from api.utils.api_utils import get_data_error_result, get_json_result, get_request_json, server_error_response, validate_request
 from rag.prompts.template import load_prompt
 from rag.prompts.generator import chunks_format
@@ -323,33 +323,65 @@ def _build_segment_voice_answer(
     }
 
 
-def _build_single_voice_answer(
+async def _collect_full_chat_answer(
+    dialog,
+    messages,
     *,
-    message: dict,
-    session_id: str,
-    final: bool = False,
-) -> dict | None:
-    voice = _sanitize_voice_payload(message.get("voice"))
-    if not isinstance(voice, dict):
-        return None
+    model_tenant_id=None,
+    **kwargs,
+) -> dict:
+    answer = None
+    async for ans in async_chat(
+        dialog,
+        messages,
+        False,
+        model_tenant_id=model_tenant_id,
+        **kwargs,
+    ):
+        answer = ans
+        break
 
-    mime_type = _normalize_tts_mime_type(voice.get("mime_type"))
+    if answer is None:
+        raise RuntimeError("assistant_empty_reply")
 
-    return {
-        "answer": "",
-        "reference": {},
-        "audio_binary": None,
-        "audio_mime_type": mime_type,
-        "prompt": "",
-        "created_at": message.get("created_at", time.time()),
-        "final": final,
-        "id": message.get("id"),
-        "session_id": session_id,
-        "voice": {
-            **voice,
-            "mime_type": mime_type,
-        },
-    }
+    return answer
+
+
+async def _yield_pseudo_stream_answers(
+    *,
+    structured_answer: dict,
+    voice_message: dict | None = None,
+):
+    full_text = structured_answer.get("answer") or ""
+    text_chunks = split_answer_for_pseudo_stream(full_text) or [""]
+    voice_payload = None
+    if voice_message:
+        voice_payload = _sanitize_voice_payload(voice_message.get("voice"))
+    if voice_payload is None:
+        voice_payload = _sanitize_voice_payload(structured_answer.get("voice"))
+
+    for index, chunk in enumerate(text_chunks):
+        is_last = index == len(text_chunks) - 1
+        payload = {
+            "answer": chunk,
+            "reference": structured_answer.get("reference") if is_last else {},
+            "audio_binary": None,
+            "audio_mime_type": (
+                (voice_payload or {}).get("mime_type")
+                or structured_answer.get("audio_mime_type")
+            ),
+            "prompt": structured_answer.get("prompt") if is_last else "",
+            "created_at": structured_answer.get("created_at", time.time()),
+            "final": is_last,
+            "id": structured_answer.get("id"),
+            "session_id": structured_answer.get("session_id"),
+        }
+        if voice_payload and index == 0:
+            payload["voice"] = deepcopy(voice_payload)
+
+        yield payload
+        if not is_last and len(text_chunks) > 1:
+            await asyncio.sleep(0.015)
 
 
 @manager.route("/set", methods=["POST"])  # noqa: F821
@@ -654,9 +686,17 @@ async def completion():
                 return
 
             try:
-                async for ans in async_chat(dia, msg, True, model_tenant_id=model_tenant_id, **req):
-                    structured = structure_answer(conv, ans, message_id, conv.id)
-                    yield _serialize_sse(structured)
+                full_answer = await _collect_full_chat_answer(
+                    dia,
+                    msg,
+                    model_tenant_id=model_tenant_id,
+                    **{
+                        **req,
+                        "live_tts": False,
+                        "enable_tts": False,
+                    },
+                )
+                structured = structure_answer(conv, full_answer, message_id, conv.id)
             except Exception as e:
                 logging.exception(e)
                 yield _serialize_sse(
@@ -677,6 +717,7 @@ async def completion():
                     cleaned_text = VoiceChatService.prepare_assistant_tts_message(
                         conv,
                         message_id,
+                        structured.get("answer") or "",
                     )
                 ConversationService.update_by_id(
                     conv.id,
@@ -725,14 +766,11 @@ async def completion():
                 _merge_latest_voice_state(conv)
                 ConversationService.update_by_id(conv.id, conv.to_dict())
 
-            if latest_voice_message:
-                voice_answer = _build_single_voice_answer(
-                    message=latest_voice_message,
-                    session_id=conv.id,
-                    final=False,
-                )
-                if voice_answer:
-                    yield _serialize_sse(voice_answer)
+            async for payload in _yield_pseudo_stream_answers(
+                structured_answer=structured,
+                voice_message=latest_voice_message,
+            ):
+                yield _serialize_sse(payload)
 
             yield _serialize_sse(True)
 

@@ -482,6 +482,7 @@ export const useSendMessage = (
       }
 
       if (type === 'assistant_delta') {
+        const incomingVoice = data.voice as IMessage['voice'] | undefined;
         upsertMessage(data.message_id, MessageType.Assistant, (previous) => ({
           ...(previous ?? {
             id: data.message_id,
@@ -492,7 +493,25 @@ export const useSendMessage = (
           role: MessageType.Assistant,
           conversationId: targetConversationId,
           content: `${previous?.content ?? ''}${data.delta ?? ''}`,
+          voice: mergeVoiceMeta(previous?.voice, incomingVoice),
         }));
+
+        if (
+          data.message_id &&
+          incomingVoice?.kind === 'single' &&
+          incomingVoice.status === 'ready' &&
+          incomingVoice.file_id &&
+          autoPlayEligibleAssistantIdsRef.current.has(data.message_id)
+        ) {
+          removeAutoPlayEligibleAssistant(data.message_id);
+          markAssistantVoiceAutoPlay(data.message_id);
+        } else if (
+          data.message_id &&
+          incomingVoice?.status &&
+          incomingVoice.status !== 'streaming'
+        ) {
+          removeAutoPlayEligibleAssistant(data.message_id);
+        }
         return;
       }
 

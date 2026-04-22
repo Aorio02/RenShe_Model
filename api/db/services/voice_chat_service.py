@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import logging
 import threading
@@ -16,6 +17,10 @@ from common.misc_utils import get_uuid
 
 
 DEFAULT_TTS_MIME_TYPE = "audio/mpeg"
+PSEUDO_STREAM_MAX_CHARS = 36
+PSEUDO_STREAM_MIN_CHARS = 10
+PSEUDO_STREAM_BREAK_CHARS = "。！？；，、,.!?;\n"
+PSEUDO_STREAM_CHUNK_DELAY_SECONDS = 0.015
 
 
 def _now_ts() -> float:
@@ -151,6 +156,46 @@ def _normalize_audio_mime_type(mime_type: str | None, default: str = DEFAULT_TTS
     if not mime_type:
         return default
     return mime_type.split(";", 1)[0].strip().lower() or default
+
+
+def split_answer_for_pseudo_stream(text: str, max_chars: int = PSEUDO_STREAM_MAX_CHARS) -> list[str]:
+    if not text:
+        return []
+
+    chunks: list[str] = []
+    start = 0
+    total = len(text)
+    max_chars = max(int(max_chars or PSEUDO_STREAM_MAX_CHARS), 8)
+    min_chars = max(6, min(PSEUDO_STREAM_MIN_CHARS, max_chars))
+
+    while start < total:
+        remaining = total - start
+        if remaining <= max_chars:
+            chunks.append(text[start:])
+            break
+
+        limit = min(total, start + max_chars)
+        scan_start = min(total, start + min_chars)
+        split_at = -1
+
+        for idx in range(limit, scan_start, -1):
+            if text[idx - 1] in PSEUDO_STREAM_BREAK_CHARS:
+                split_at = idx
+                break
+
+        if split_at < 0:
+            for idx in range(limit, scan_start, -1):
+                if text[idx - 1].isspace():
+                    split_at = idx
+                    break
+
+        if split_at < 0:
+            split_at = limit
+
+        chunks.append(text[start:split_at])
+        start = split_at
+
+    return [chunk for chunk in chunks if chunk]
 
 
 def _build_single_voice_state(
@@ -658,49 +703,118 @@ class VoiceChatService:
         reference = {"chunks": [], "doc_aggs": []}
 
         try:
-            async for ans in async_chat(dialog, chat_messages, True, enable_tts=False):
-                if ans.get("final"):
-                    reference = ans.get("reference") or {"chunks": [], "doc_aggs": []}
-                    continue
+            if not tts_enabled:
+                async for ans in async_chat(dialog, chat_messages, True, enable_tts=False):
+                    if ans.get("final"):
+                        reference = ans.get("reference") or {"chunks": [], "doc_aggs": []}
+                        continue
 
-                delta = ans.get("answer") or ""
-                if not delta:
-                    continue
+                    delta = ans.get("answer") or ""
+                    if not delta:
+                        continue
+
+                    conv.message[assistant_idx]["id"] = assistant_message["id"]
+                    conv.message[assistant_idx]["role"] = "assistant"
+                    conv.message[assistant_idx]["content"] += delta
+                    conv.message[assistant_idx]["created_at"] = _now_ts()
+
+                    yield _stream_event(
+                        "assistant_delta",
+                        {
+                            "message_id": assistant_message["id"],
+                            "delta": delta,
+                        },
+                    )
 
                 conv.message[assistant_idx]["id"] = assistant_message["id"]
                 conv.message[assistant_idx]["role"] = "assistant"
-                conv.message[assistant_idx]["content"] += delta
                 conv.message[assistant_idx]["created_at"] = _now_ts()
+                conv.reference[-1] = reference
+                _persist_conversation(conv)
+                final_message = copy.deepcopy(conv.message[assistant_idx])
+            else:
+                full_answer = None
+                async for ans in async_chat(dialog, chat_messages, False, enable_tts=False):
+                    full_answer = ans
+                    break
 
-                yield _stream_event(
-                    "assistant_delta",
-                    {
+                if full_answer is None:
+                    raise RuntimeError("assistant_empty_reply")
+
+                answer_text = full_answer.get("answer") or ""
+                reference = full_answer.get("reference") or {"chunks": [], "doc_aggs": []}
+
+                conv.message[assistant_idx]["id"] = assistant_message["id"]
+                conv.message[assistant_idx]["role"] = "assistant"
+                conv.message[assistant_idx]["content"] = answer_text
+                conv.message[assistant_idx]["created_at"] = _now_ts()
+                conv.reference[-1] = reference
+
+                latest_message = None
+                try:
+                    cleaned_text = cls.prepare_assistant_tts_message(
+                        conv,
+                        assistant_message["id"],
+                        answer_text,
+                    )
+                    _persist_conversation(conv)
+
+                    if cleaned_text:
+                        cls.enqueue_assistant_tts_task(
+                            user_id=user_id,
+                            conversation_id=conv.id,
+                            message_id=assistant_message["id"],
+                        )
+                        latest_message = await asyncio.to_thread(
+                            cls.wait_for_assistant_tts_message,
+                            user_id=user_id,
+                            conversation_id=conv.id,
+                            message_id=assistant_message["id"],
+                            timeout=180.0,
+                        )
+                    else:
+                        latest_message = await asyncio.to_thread(
+                            cls.get_assistant_message,
+                            user_id=user_id,
+                            conversation_id=conv.id,
+                            message_id=assistant_message["id"],
+                        )
+                except Exception:
+                    logging.exception(
+                        "assistant tts failed for %s/%s",
+                        conv.id,
+                        assistant_message["id"],
+                    )
+                    cls._set_assistant_voice(
+                        conv,
+                        assistant_idx,
+                        status="failed",
+                        error="tts_failed",
+                    )
+                    conv.reference[-1] = reference
+                    _persist_conversation(conv)
+                    latest_message = copy.deepcopy(conv.message[assistant_idx])
+
+                conv.message[assistant_idx] = latest_message
+                conv.reference[-1] = reference
+                _persist_conversation(conv)
+
+                text_chunks = split_answer_for_pseudo_stream(answer_text)
+                voice_payload = copy.deepcopy((latest_message.get("voice") or None))
+                for index, delta in enumerate(text_chunks):
+                    event = {
                         "message_id": assistant_message["id"],
                         "delta": delta,
-                    },
-                )
+                    }
+                    if index == 0 and voice_payload:
+                        event["voice"] = voice_payload
 
-            conv.message[assistant_idx]["id"] = assistant_message["id"]
-            conv.message[assistant_idx]["role"] = "assistant"
-            conv.message[assistant_idx]["created_at"] = _now_ts()
-            conv.reference[-1] = reference
-            should_enqueue_tts = False
-            if tts_enabled:
-                cleaned_text = cls.prepare_assistant_tts_message(
-                    conv,
-                    assistant_message["id"],
-                    conv.message[assistant_idx].get("content") or "",
-                )
-                should_enqueue_tts = bool(cleaned_text)
-            _persist_conversation(conv)
-            if should_enqueue_tts:
-                cls.enqueue_assistant_tts_task(
-                    user_id=user_id,
-                    conversation_id=conv.id,
-                    message_id=assistant_message["id"],
-                )
+                    yield _stream_event("assistant_delta", event)
+                    if index < len(text_chunks) - 1:
+                        await asyncio.sleep(PSEUDO_STREAM_CHUNK_DELAY_SECONDS)
 
-            final_message = copy.deepcopy(conv.message[assistant_idx])
+                final_message = copy.deepcopy(conv.message[assistant_idx])
+
             final_message["reference"] = reference
             yield _stream_event(
                 "assistant_done",
