@@ -31,7 +31,11 @@ from api.db.services.llm_service import LLMBundle
 from api.db.services.search_service import SearchService
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.user_service import TenantService, UserTenantService
-from api.db.services.voice_chat_service import VoiceChatService, split_answer_for_pseudo_stream
+from api.db.services.voice_chat_service import (
+    VoiceChatService,
+    pseudo_stream_delay_for_chunk,
+    split_answer_for_pseudo_stream,
+)
 from api.utils.api_utils import get_data_error_result, get_json_result, get_request_json, server_error_response, validate_request
 from rag.prompts.template import load_prompt
 from rag.prompts.generator import chunks_format
@@ -381,7 +385,7 @@ async def _yield_pseudo_stream_answers(
 
         yield payload
         if not is_last and len(text_chunks) > 1:
-            await asyncio.sleep(0.015)
+            await asyncio.sleep(pseudo_stream_delay_for_chunk(chunk))
 
 
 @manager.route("/set", methods=["POST"])  # noqa: F821

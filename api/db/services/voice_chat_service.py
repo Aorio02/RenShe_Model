@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import logging
+import os
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -17,10 +18,29 @@ from common.misc_utils import get_uuid
 
 
 DEFAULT_TTS_MIME_TYPE = "audio/mpeg"
-PSEUDO_STREAM_MAX_CHARS = 36
-PSEUDO_STREAM_MIN_CHARS = 10
+PSEUDO_STREAM_UNIT = (os.getenv("RAGFLOW_PSEUDO_STREAM_UNIT") or "char").strip().lower()
+PSEUDO_STREAM_MAX_CHARS = max(int(os.getenv("RAGFLOW_PSEUDO_STREAM_MAX_CHARS", "14")), 6)
+PSEUDO_STREAM_MIN_CHARS = max(
+    4,
+    min(int(os.getenv("RAGFLOW_PSEUDO_STREAM_MIN_CHARS", "5")), PSEUDO_STREAM_MAX_CHARS),
+)
 PSEUDO_STREAM_BREAK_CHARS = "。！？；，、,.!?;\n"
-PSEUDO_STREAM_CHUNK_DELAY_SECONDS = 0.015
+PSEUDO_STREAM_CHARS_PER_SECOND = max(
+    float(os.getenv("RAGFLOW_PSEUDO_STREAM_CHARS_PER_SECOND", "18.0")),
+    1.0,
+)
+PSEUDO_STREAM_MIN_DELAY_SECONDS = max(
+    float(os.getenv("RAGFLOW_PSEUDO_STREAM_MIN_DELAY_SECONDS", "0.035")),
+    0.0,
+)
+PSEUDO_STREAM_MAX_DELAY_SECONDS = max(
+    float(os.getenv("RAGFLOW_PSEUDO_STREAM_MAX_DELAY_SECONDS", "0.25")),
+    PSEUDO_STREAM_MIN_DELAY_SECONDS,
+)
+PSEUDO_STREAM_PUNCTUATION_PAUSE_SECONDS = max(
+    float(os.getenv("RAGFLOW_PSEUDO_STREAM_PUNCTUATION_PAUSE_SECONDS", "0.06")),
+    0.0,
+)
 
 
 def _now_ts() -> float:
@@ -162,6 +182,9 @@ def split_answer_for_pseudo_stream(text: str, max_chars: int = PSEUDO_STREAM_MAX
     if not text:
         return []
 
+    if PSEUDO_STREAM_UNIT == "char":
+        return list(text)
+
     chunks: list[str] = []
     start = 0
     total = len(text)
@@ -196,6 +219,22 @@ def split_answer_for_pseudo_stream(text: str, max_chars: int = PSEUDO_STREAM_MAX
         start = split_at
 
     return [chunk for chunk in chunks if chunk]
+
+
+def pseudo_stream_delay_for_chunk(text: str) -> float:
+    effective_chars = sum(1 for char in (text or "") if not char.isspace())
+    if effective_chars <= 0:
+        return PSEUDO_STREAM_MIN_DELAY_SECONDS
+
+    delay = effective_chars / PSEUDO_STREAM_CHARS_PER_SECOND
+    tail = (text or "").rstrip()
+    if tail and tail[-1] in "。！？；.!?;":
+        delay += PSEUDO_STREAM_PUNCTUATION_PAUSE_SECONDS
+
+    return max(
+        PSEUDO_STREAM_MIN_DELAY_SECONDS,
+        min(delay, PSEUDO_STREAM_MAX_DELAY_SECONDS),
+    )
 
 
 def _build_single_voice_state(
@@ -811,7 +850,7 @@ class VoiceChatService:
 
                     yield _stream_event("assistant_delta", event)
                     if index < len(text_chunks) - 1:
-                        await asyncio.sleep(PSEUDO_STREAM_CHUNK_DELAY_SECONDS)
+                        await asyncio.sleep(pseudo_stream_delay_for_chunk(delta))
 
                 final_message = copy.deepcopy(conv.message[assistant_idx])
 
