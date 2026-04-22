@@ -176,6 +176,7 @@ export default {
     // Otros bloques de traducción
     // Continua con la misma estructura
     chat: {
+      backToChatPage: 'Volver a la página de chat',
       newConversation: 'Nueva conversación',
       createAssistant: 'Crear un asistente',
       assistantSetting: 'Configuración del asistente',

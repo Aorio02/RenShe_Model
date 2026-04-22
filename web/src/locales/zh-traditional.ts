@@ -421,6 +421,7 @@ export default {
       delete: '删除',
     },
     chat: {
+      backToChatPage: '返回聊天頁面',
       newConversation: '新會話',
       createAssistant: '新建助理',
       assistantSetting: '助理設置',

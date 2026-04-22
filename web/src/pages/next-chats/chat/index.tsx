@@ -23,7 +23,7 @@ import {
 import { IClientConversation } from '@/interfaces/database/chat';
 import { cn } from '@/lib/utils';
 import { isEmpty } from 'lodash';
-import { ArrowUpRight, LogOut } from 'lucide-react';
+import { ArrowLeft, LogOut } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
@@ -134,8 +134,12 @@ export default function Chat() {
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink onClick={navigateToChatList}>
-                {t('chat.chat')}
+              <BreadcrumbLink
+                onClick={navigateToChatList}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-text-primary px-3.5 py-1.5 text-sm font-semibold text-bg-base shadow-xs hover:bg-text-primary/90 hover:text-bg-base"
+              >
+                <ArrowLeft className="size-4" />
+                {t('chat.backToChatPage')}
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
@@ -162,11 +166,8 @@ export default function Chat() {
               <CardHeader
                 className={cn('p-5', { 'border-b': hasSingleChatBox })}
               >
-                <CardTitle className="flex justify-between items-center text-base">
+                <CardTitle className="text-base">
                   <div className="truncate">{currentConversationName}</div>
-                  <Button variant={'ghost'} onClick={switchDebugMode}>
-                    <ArrowUpRight /> {t('chat.multipleModels')}
-                  </Button>
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex-1 p-0 min-h-0">

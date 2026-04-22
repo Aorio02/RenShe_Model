@@ -549,6 +549,7 @@ export default {
       delete: 'Удалить',
     },
     chat: {
+      backToChatPage: 'Вернуться на страницу чата',
       messagePlaceholder: 'Введите ваше сообщение здесь...',
       exit: 'Выход',
       multipleModels: 'Несколько моделей',

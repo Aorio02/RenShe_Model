@@ -119,11 +119,9 @@ const VoiceVisualizer = ({
 
 const VoiceInputBox = ({
   isRecording,
-  onStop,
   recordingTime,
 }: {
   isRecording: boolean;
-  onStop: () => void;
   recordingTime: number;
 }) => {
   const formatTime = (seconds: number) => {
@@ -139,23 +137,19 @@ const VoiceInputBox = ({
         className="flex-1 bg-white/90 dark:bg-black/90 backdrop-blur-sm"
         readOnly
         value=""
-        placeholder={isRecording ? '正在录音...' : '点击麦克风开始'}
+        placeholder={isRecording ? '按住录音中，松开发送' : '按住麦克风开始录音'}
         suffix={
-          <div className="flex justify-end px-1 items-center gap-1 w-20">
-            {isRecording && (
-              <Button
-                type="button"
-                variant={'ghost'}
-                size="sm"
-                className="text-red-500 p-1 border-none hover:bg-red-50 dark:hover:bg-red-900/20"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStop();
-                }}
-              >
-                <Square className="fill-current" size={12} />
-              </Button>
-            )}
+          <div className="flex justify-end px-1 items-center gap-2 w-28">
+            <span
+              className={cn(
+                'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
+                isRecording
+                  ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300'
+                  : 'bg-muted text-muted-foreground',
+              )}
+            >
+              {isRecording ? '松开发送' : '按住说话'}
+            </span>
             <span className="text-xs text-muted-foreground font-mono">
               {formatTime(recordingTime)}
             </span>
@@ -179,6 +173,7 @@ export const AudioButton = ({
   onSubmit?: (payload: RecordedVoicePayload) => void;
 }) => {
   const [isRecording, setIsRecording] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -189,6 +184,8 @@ export const AudioButton = ({
   const intervalRef = useRef<number | null>(null);
   const currentMimeTypeRef = useRef<string>('audio/webm');
   const recordingStartedAtRef = useRef<number>(0);
+  const isPressingRef = useRef(false);
+  const stopPressedRecordingRef = useRef<() => void>(() => {});
 
   const cleanup = useCallback(() => {
     if (intervalRef.current) {
@@ -206,6 +203,20 @@ export const AudioButton = ({
       mediaRecorderRef.current = null;
     }
   }, []);
+
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+      return;
+    }
+
+    setIsRecording(false);
+    setPopoverOpen(false);
+    setRecordingTime(0);
+    recordingStartedAtRef.current = 0;
+    cleanup();
+  }, [cleanup]);
 
   const handleRecordingStop = useCallback(async () => {
     setIsRecording(false);
@@ -245,13 +256,13 @@ export const AudioButton = ({
 
   const startRecording = useCallback(async () => {
     try {
+      setIsStarting(true);
       if (typeof MediaRecorder === 'undefined') {
         throw new Error('当前浏览器不支持录音');
       }
 
       setRecordingTime(0);
       audioChunksRef.current = [];
-      recordingStartedAtRef.current = Date.now();
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -260,6 +271,14 @@ export const AudioButton = ({
           autoGainControl: true,
         },
       });
+
+      if (!isPressingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStartedAtRef.current = 0;
+        setPopoverOpen(false);
+        return;
+      }
+
       mediaStreamRef.current = stream;
 
       const possibleTypes = [
@@ -303,6 +322,7 @@ export const AudioButton = ({
       };
 
       recorder.start(250);
+      recordingStartedAtRef.current = Date.now();
       setIsRecording(true);
       setPopoverOpen(true);
 
@@ -315,6 +335,10 @@ export const AudioButton = ({
           Math.floor((Date.now() - recordingStartedAtRef.current) / 1000),
         );
       }, 250);
+
+      if (!isPressingRef.current && recorder.state !== 'inactive') {
+        recorder.stop();
+      }
     } catch (error: any) {
       let msg = '无法启动录音';
       if (error.name === 'NotAllowedError') msg = '麦克风权限被拒绝';
@@ -333,24 +357,51 @@ export const AudioButton = ({
       setIsRecording(false);
       recordingStartedAtRef.current = 0;
       cleanup();
+    } finally {
+      setIsStarting(false);
     }
   }, [cleanup, handleRecordingStop]);
 
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      if (mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
-    } else {
-      setIsRecording(false);
-      cleanup();
-      recordingStartedAtRef.current = 0;
+  const handleGlobalMouseUp = useCallback(() => {
+    stopPressedRecordingRef.current();
+  }, []);
+
+  const handleWindowBlur = useCallback(() => {
+    stopPressedRecordingRef.current();
+  }, []);
+
+  const handleVisibilityChange = useCallback(() => {
+    if (document.hidden) {
+      stopPressedRecordingRef.current();
     }
-  }, [cleanup, isRecording]);
+  }, []);
+
+  const removeGlobalReleaseListeners = useCallback(() => {
+    window.removeEventListener('mouseup', handleGlobalMouseUp);
+    window.removeEventListener('blur', handleWindowBlur);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [handleGlobalMouseUp, handleVisibilityChange, handleWindowBlur]);
+
+  const handlePressEnd = useCallback(() => {
+    if (!isPressingRef.current && mediaRecorderRef.current?.state !== 'recording') {
+      return;
+    }
+
+    isPressingRef.current = false;
+    removeGlobalReleaseListeners();
+    stopRecording();
+  }, [removeGlobalReleaseListeners, stopRecording]);
 
   useEffect(() => {
-    return () => cleanup();
-  }, [cleanup]);
+    stopPressedRecordingRef.current = handlePressEnd;
+  }, [handlePressEnd]);
+
+  useEffect(() => {
+    return () => {
+      removeGlobalReleaseListeners();
+      cleanup();
+    };
+  }, [cleanup, removeGlobalReleaseListeners]);
 
   return (
     <div className="relative w-6 h-6 flex items-center justify-center">
@@ -381,24 +432,38 @@ export const AudioButton = ({
             type="button"
             variant="ghost"
             size="sm"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.button !== 0 || isProcessing || isStarting || isRecording) {
+                return;
+              }
+
+              isPressingRef.current = true;
+              removeGlobalReleaseListeners();
+              window.addEventListener('mouseup', handleGlobalMouseUp);
+              window.addEventListener('blur', handleWindowBlur);
+              document.addEventListener(
+                'visibilitychange',
+                handleVisibilityChange,
+              );
+              void startRecording();
+            }}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              if (isProcessing) return;
-              if (isRecording) stopRecording();
-              else void startRecording();
             }}
             className={cn(
               'w-6 h-6 p-0 rounded-md border-none transition-all duration-200',
               isRecording
                 ? 'bg-state-success-100 text-state-success hover:bg-state-success-200'
                 : 'hover:bg-muted text-muted-foreground hover:text-foreground',
-              isProcessing && 'cursor-not-allowed opacity-70',
+              (isProcessing || isStarting) && 'cursor-not-allowed opacity-70',
             )}
             disabled={isProcessing}
-            title={isRecording ? '停止录音' : '语音输入'}
+            title={isRecording ? '松开结束并发送' : '按住语音输入'}
           >
-            {isProcessing ? (
+            {isProcessing || isStarting ? (
               <Loader2 size={16} className="animate-spin" />
             ) : isRecording ? (
               <Square size={14} className="fill-current opacity-80" />
@@ -417,7 +482,6 @@ export const AudioButton = ({
         >
           <VoiceInputBox
             isRecording={isRecording}
-            onStop={stopRecording}
             recordingTime={recordingTime}
           />
           {isProcessing && (

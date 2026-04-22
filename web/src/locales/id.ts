@@ -348,6 +348,7 @@ export default {
       mind: 'Peta pikiran',
     },
     chat: {
+      backToChatPage: 'Kembali ke halaman chat',
       newConversation: 'Percakapan baru',
       createAssistant: 'Buat Asisten',
       assistantSetting: 'Pengaturan Asisten',

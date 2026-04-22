@@ -57,7 +57,7 @@ export const useKnowledgeBaseId = (): string => {
 export const useTestRetrieval = () => {
   const knowledgeBaseId = useKnowledgeBaseId();
   const [values, setValues] = useState<ITestRetrievalRequestBody>();
-  const mountedRef = useRef(false);
+  const hasTriggeredRef = useRef(false);
   const { filterValue, handleFilterSubmit } = useHandleFilterSubmit();
 
   const [page, setPage] = useState(1);
@@ -100,18 +100,22 @@ export const useTestRetrieval = () => {
     },
   });
 
+  const runTest = useCallback(() => {
+    hasTriggeredRef.current = true;
+    return refetch();
+  }, [refetch]);
+
   useEffect(() => {
-    if (mountedRef.current) {
+    if (hasTriggeredRef.current) {
       refetch();
     }
-    mountedRef.current = true;
   }, [page, pageSize, refetch, filterValue]);
 
   return {
     data,
     loading,
     setValues,
-    refetch,
+    refetch: runTest,
     onPaginationChange,
     page,
     pageSize,

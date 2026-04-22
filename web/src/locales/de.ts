@@ -697,6 +697,7 @@ Diese Auto-Tag-Funktion verbessert den Abruf, indem sie eine weitere Schicht dom
       delete: 'Löschen',
     },
     chat: {
+      backToChatPage: 'Zurück zur Chat-Seite',
       messagePlaceholder: 'Geben Sie hier Ihre Nachricht ein...',
       exit: 'Verlassen',
       multipleModels: 'Mehrere Modelle',

@@ -527,6 +527,7 @@ Quanto sopra è il contenuto che devi riassumere.`,
       delete: 'Elimina',
     },
     chat: {
+      backToChatPage: 'Torna alla pagina chat',
       messagePlaceholder: 'Scrivi il tuo messaggio qui...',
       exit: 'Esci',
       multipleModels: 'Modelli multipli',

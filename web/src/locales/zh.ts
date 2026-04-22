@@ -671,6 +671,7 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       delete: '删除',
     },
     chat: {
+      backToChatPage: '返回聊天页面',
       messagePlaceholder: '请输入消息...',
       exit: '退出',
       multipleModels: '多模型',

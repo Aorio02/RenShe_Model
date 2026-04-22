@@ -332,6 +332,7 @@ export default {
       delete: 'Supprimer',
     },
     chat: {
+      backToChatPage: 'Retour à la page de chat',
       newConversation: 'Nouvelle conversation',
       createAssistant: 'Créer un assistant',
       assistantSetting: 'Paramètres de l’assistant',

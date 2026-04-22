@@ -344,6 +344,7 @@ export default {
       questionTip: `Se houver perguntas fornecidas, a incorporação do fragmento será baseada nelas.`,
     },
     chat: {
+      backToChatPage: 'Voltar para a página de chat',
       newConversation: 'Nova conversa',
       createAssistant: 'Criar um Assistente',
       assistantSetting: 'Configuração do Assistente',
