@@ -5,28 +5,25 @@ import { Button } from '@/components/ui/button';
 import { Domain } from '@/constants/common';
 import { useSecondPathName } from '@/hooks/route-hook';
 import { useLogout } from '@/hooks/use-login-request';
+import { useSystemRoleAccess } from '@/hooks/use-system-role-access';
 import {
   useFetchSystemVersion,
   useFetchUserInfo,
 } from '@/hooks/use-user-setting-request';
 import { cn } from '@/lib/utils';
 import { Routes } from '@/routes';
-import { TFunction } from 'i18next';
 import { Banknote, Box,Users } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useHandleMenuClick } from './hooks';
 import logoImg from '@/assets/logo.png';
-const menuItems = (t: TFunction) => [
-  { icon: Box, label: t('setting.model'), key: Routes.Model },
-  { icon: Banknote, label: 'MCP', key: Routes.Mcp },
-  { icon: Users, label: t('setting.team'), key: Routes.Team },
-];
 export function SideBar() {
   const pathName = useSecondPathName();
   const { data: userInfo } = useFetchUserInfo();
   const { handleMenuClick, active } = useHandleMenuClick();
   const { version, fetchSystemVersion } = useFetchSystemVersion();
+  const { showUserSettingMcp, showUserSettingModel } =
+    useSystemRoleAccess();
   const { t } = useTranslation();
   useEffect(() => {
     if (location.host !== Domain) {
@@ -34,6 +31,15 @@ export function SideBar() {
     }
   }, [fetchSystemVersion]);
   const { logout } = useLogout();
+  const menuItems = [
+    ...(showUserSettingModel
+      ? [{ icon: Box, label: t('setting.model'), key: Routes.Model }]
+      : []),
+    ...(showUserSettingMcp
+      ? [{ icon: Banknote, label: 'MCP', key: Routes.Mcp }]
+      : []),
+    { icon: Users, label: t('setting.team'), key: Routes.Team },
+  ];
 
   return (
     <aside className="w-[303px] bg-white/10 backdrop-blur-md flex flex-col border-r border-white/20">
@@ -52,7 +58,7 @@ export function SideBar() {
         <p className="text-sm text-text-primary">{userInfo?.email}</p>
       </div>
       <div className="flex-1 overflow-auto">
-        {menuItems(t).map((item, idx) => {
+        {menuItems.map((item, idx) => {
           const hoverKey = pathName === item.key;
           return (
             <div key={idx}>

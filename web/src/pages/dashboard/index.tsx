@@ -1,44 +1,44 @@
-import { useEffect, useState } from 'react';
-import { Book, Bot, FileText, Settings } from 'lucide-react';
-import { Link, useNavigate } from 'react-router';
 import backImg from '@/assets/back.png';
 import logoImg from '@/assets/logo.png';
+import { useSystemRoleAccess } from '@/hooks/use-system-role-access';
+import {
+  Book,
+  Bot,
+  FileText,
+  Settings,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [isChecking, setIsChecking] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
+  const {
+    loading,
+    showDashboardDataset,
+    showDashboardFiles,
+    showDashboardModelShortcut,
+  } = useSystemRoleAccess();
 
   useEffect(() => {
-    // ======================
-    // 1. 校验是否登录
-    // ======================
     const token = localStorage.getItem('Token');
-    const userInfoStr = localStorage.getItem('userInfo');
 
-    if (!token || !userInfoStr) {
+    if (!token) {
       navigate('/login', { replace: true });
       return;
     }
 
-    // ======================
-    // 2. 【关键】根据邮箱判断是否是管理员
-    // 在这里写你的管理员邮箱！
-    // ======================
-    const userInfo = JSON.parse(userInfoStr);
-    const adminEmails = ['1223086775@qq.com', 'RenShe@qq.com'];
-    setIsAdmin(adminEmails.includes(userInfo.email));
-
-    setIsChecking(false);
+    setHasCheckedAuth(true);
   }, [navigate]);
 
-  // 加载状态
-  if (isChecking) {
+  if (!hasCheckedAuth || loading) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-[#06336a] text-white">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-6"></div>
-          <p className="text-xl font-bold tracking-widest animate-pulse">正在校验登录状态...</p>
+          <p className="text-xl font-bold tracking-widest animate-pulse">
+            正在校验登录状态...
+          </p>
         </div>
       </div>
     );
@@ -57,17 +57,14 @@ const Dashboard = () => {
           opacity: 0.15,
         }}
       />
-      
+
       <div className="w-full h-24 flex items-center justify-center relative px-8 z-20">
         <div className="bg-[#f0f9ff]/80 backdrop-blur-md text-[#0284c7] font-semibold text-2xl tracking-widest px-12 py-3 rounded-xl shadow-lg border border-white/30 flex items-center gap-4">
           <img src={logoImg} alt="logo" className="h-10 w-auto" />
           人社智能问答系统
         </div>
 
-        {/* ====================== */}
-        {/* 只有管理员能看到 模型配置 */}
-        {/* ====================== */}
-        {isAdmin && (
+        {showDashboardModelShortcut && (
           <div className="absolute right-8">
             <Link
               to="/user-setting/model"
@@ -86,36 +83,64 @@ const Dashboard = () => {
             欢迎访问人社服务平台
           </h1>
           <p className="text-[#a0cbfc] text-lg tracking-widest mb-10 flex gap-4">
-            <span>一体式人社服务</span><span>方便</span><span>快捷</span><span>安全</span>
+            <span>一体式人社服务</span>
+            <span>方便</span>
+            <span>快捷</span>
+            <span>安全</span>
           </p>
           <ul className="space-y-4 text-xl tracking-wider text-white">
-            <li><span className="flex items-center gap-3"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>社保服务</span></li>
-            <li><span className="flex items-center gap-3"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>医保服务</span></li>
-            <li><span className="flex items-center gap-3"><span className="w-2.5 h-2.5 bg-white rounded-full"></span>就业服务</span></li>
+            <li>
+              <span className="flex items-center gap-3">
+                <span className="w-2.5 h-2.5 bg-white rounded-full"></span>
+                社保服务
+              </span>
+            </li>
+            <li>
+              <span className="flex items-center gap-3">
+                <span className="w-2.5 h-2.5 bg-white rounded-full"></span>
+                医保服务
+              </span>
+            </li>
+            <li>
+              <span className="flex items-center gap-3">
+                <span className="w-2.5 h-2.5 bg-white rounded-full"></span>
+                就业服务
+              </span>
+            </li>
           </ul>
         </div>
 
         <div className="absolute bottom-32 left-0 w-full flex gap-8 lg:gap-12 justify-center px-10">
-          {/* ====================== */}
-          {/* 管理员：显示所有功能 */}
-          {/* 普通用户：只显示 智能问答 */}
-          {/* ====================== */}
-          
-          {isAdmin && (
-            <Link to="/datasets" className="w-[380px] h-[180px] group bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl shadow-xl flex items-center justify-center px-8 gap-6 hover:bg-white/30 hover:scale-105 transition-all">
-              <div className="w-16 h-16 bg-gradient-to-b from-yellow-300 to-amber-500 rounded-xl flex items-center justify-center"><Book size={32} className="text-white" /></div>
+          {showDashboardDataset && (
+            <Link
+              to="/datasets"
+              className="w-[380px] h-[180px] group bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl shadow-xl flex items-center justify-center px-8 gap-6 hover:bg-white/30 hover:scale-105 transition-all"
+            >
+              <div className="w-16 h-16 bg-gradient-to-b from-yellow-300 to-amber-500 rounded-xl flex items-center justify-center">
+                <Book size={32} className="text-white" />
+              </div>
               <span className="text-[24px] font-medium">人社知识库管理</span>
             </Link>
           )}
 
-          <Link to="/next-chats" className="w-[380px] h-[180px] group bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl shadow-xl flex items-center justify-center px-8 gap-6 hover:bg-white/30 hover:scale-105 transition-all">
-            <div className="w-16 h-16 bg-gradient-to-b from-blue-300 to-blue-500 rounded-xl flex items-center justify-center"><Bot size={32} className="text-white" /></div>
+          <Link
+            to="/next-chats"
+            className="w-[380px] h-[180px] group bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl shadow-xl flex items-center justify-center px-8 gap-6 hover:bg-white/30 hover:scale-105 transition-all"
+          >
+            <div className="w-16 h-16 bg-gradient-to-b from-blue-300 to-blue-500 rounded-xl flex items-center justify-center">
+              <Bot size={32} className="text-white" />
+            </div>
             <span className="text-[24px] font-medium">人社智能问答</span>
           </Link>
 
-          {isAdmin && (
-            <Link to="/files" className="w-[380px] h-[180px] group bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl shadow-xl flex items-center justify-center px-8 gap-6 hover:bg-white/30 hover:scale-105 transition-all">
-              <div className="w-16 h-16 bg-gradient-to-b from-green-400 to-green-600 rounded-xl flex items-center justify-center"><FileText size={32} className="text-white" /></div>
+          {showDashboardFiles && (
+            <Link
+              to="/files"
+              className="w-[380px] h-[180px] group bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl shadow-xl flex items-center justify-center px-8 gap-6 hover:bg-white/30 hover:scale-105 transition-all"
+            >
+              <div className="w-16 h-16 bg-gradient-to-b from-green-400 to-green-600 rounded-xl flex items-center justify-center">
+                <FileText size={32} className="text-white" />
+              </div>
               <span className="text-[24px] font-medium">人社文件管理</span>
             </Link>
           )}

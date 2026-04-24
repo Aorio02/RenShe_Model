@@ -2,6 +2,7 @@ import { IconFontFill } from '@/components/icon-font';
 import { RAGFlowAvatar } from '@/components/ragflow-avatar';
 import { Button } from '@/components/ui/button';
 import { useSecondPathName } from '@/hooks/route-hook';
+import { useSystemRoleAccess } from '@/hooks/use-system-role-access';
 import {
   useFetchKnowledgeBaseConfiguration,
   useFetchKnowledgeGraph,
@@ -25,6 +26,12 @@ export function SideBar({ refreshCount }: PropType) {
   // refreshCount: be for avatar img sync update on top left
   const { data } = useFetchKnowledgeBaseConfiguration({ refreshCount });
   const { data: routerData } = useFetchKnowledgeGraph();
+  const {
+    showDatasetSidebarKnowledgeGraph,
+    showDatasetSidebarLogs,
+    showDatasetSidebarSetting,
+    showDatasetSidebarTesting,
+  } = useSystemRoleAccess();
   const { t } = useTranslation();
 
   const items = useMemo(() => {
@@ -34,23 +41,33 @@ export function SideBar({ refreshCount }: PropType) {
         label: t(`knowledgeDetails.subbarFiles`),
         key: Routes.DatasetBase,
       },
-      {
+    ];
+
+    if (showDatasetSidebarTesting) {
+      list.push({
         icon: <FileSearch2 className="size-4" />,
         label: t(`knowledgeDetails.testing`),
         key: Routes.DatasetTesting,
-      },
-      {
+      });
+    }
+
+    if (showDatasetSidebarLogs) {
+      list.push({
         icon: <Logs className="size-4" />,
         label: t(`knowledgeDetails.overview`),
         key: Routes.DataSetOverview,
-      },
-      {
+      });
+    }
+
+    if (showDatasetSidebarSetting) {
+      list.push({
         icon: <Banknote className="size-4" />,
         label: t(`knowledgeDetails.configuration`),
         key: Routes.DataSetSetting,
-      },
-    ];
-    if (!isEmpty(routerData?.graph)) {
+      });
+    }
+
+    if (showDatasetSidebarKnowledgeGraph && !isEmpty(routerData?.graph)) {
       list.push({
         icon: <IconFontFill name="knowledgegraph" className="size-4" />,
         label: t(`knowledgeDetails.knowledgeGraph`),
@@ -58,7 +75,14 @@ export function SideBar({ refreshCount }: PropType) {
       });
     }
     return list;
-  }, [t, routerData]);
+  }, [
+    routerData,
+    showDatasetSidebarKnowledgeGraph,
+    showDatasetSidebarLogs,
+    showDatasetSidebarSetting,
+    showDatasetSidebarTesting,
+    t,
+  ]);
 
   return (
     <aside className="relative p-5 space-y-8">

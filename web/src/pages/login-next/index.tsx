@@ -25,6 +25,10 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from '@/components/ui/radio-group';
 import { cn } from '@/lib/utils';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -32,6 +36,14 @@ import { z } from 'zod';
 import { BgSvg } from './bg';
 import FlipCard3D from './card';
 import './index.less';
+
+type LoginFormValues = {
+  nickname?: string;
+  system_role?: string;
+  email: string;
+  password: string;
+  remember?: boolean;
+};
 
 const Login = () => {
   const [title, setTitle] = useState('login');
@@ -44,7 +56,7 @@ const Login = () => {
   const { t } = useTranslation('translation', { keyPrefix: 'login' });
   const [isLoginPage, setIsLoginPage] = useState(true);
 
-  const [isUserInteracting, setIsUserInteracting] = useState(true);
+  const [isUserInteracting] = useState(true);
 
   const loading =
     signLoading ||
@@ -80,6 +92,7 @@ const Login = () => {
   const FormSchema = z
     .object({
       nickname: z.string().optional(),
+      system_role: z.string().optional(),
       email: z
         .string()
         .email()
@@ -95,10 +108,19 @@ const Login = () => {
           code: z.ZodIssueCode.custom,
         });
       }
+
+      if (title === 'register' && !data.system_role) {
+        ctx.addIssue({
+          path: ['system_role'],
+          message: t('roleRequired'),
+          code: z.ZodIssueCode.custom,
+        });
+      }
     });
   const form = useForm({
     defaultValues: {
       nickname: '',
+      system_role: 'user',
       email: '',
       password: '',
       confirmPassword: '',
@@ -107,11 +129,8 @@ const Login = () => {
     resolver: zodResolver(FormSchema),
   });
 
-  const onCheck = async (params) => {
-    console.log('params', params);
+  const onCheck = async (params: LoginFormValues) => {
     try {
-      // const params = await form.validateFields();
-
       const rsaPassWord = rsaPsw(params.password) as string;
 
       if (title === 'login') {
@@ -124,16 +143,17 @@ const Login = () => {
         }
       } else {
         const code = await register({
-          nickname: params.nickname,
+          nickname: params.nickname || '',
           email: params.email,
           password: rsaPassWord,
+          system_role: params.system_role,
         });
         if (code === 0) {
           setTitle('login');
         }
       }
-    } catch (errorInfo) {
-      console.log('Failed:', errorInfo);
+    } catch {
+      return;
     }
   };
 
@@ -239,6 +259,76 @@ const Login = () => {
                                 autoComplete="username"
                                 {...field}
                               />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                    {title === 'register' && (
+                      <FormField
+                        control={form.control}
+                        name="system_role"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel required>{t('roleLabel')}</FormLabel>
+                            <FormControl>
+                              <RadioGroup
+                                className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                                value={field.value}
+                                onValueChange={field.onChange}
+                              >
+                                <label
+                                  htmlFor="system-role-admin"
+                                  className={cn(
+                                    'flex items-start gap-3 rounded-xl border px-4 py-4 cursor-pointer transition-colors',
+                                    {
+                                      'border-accent-primary bg-accent-primary/10':
+                                        field.value === 'admin',
+                                      'border-border-button bg-bg-card':
+                                        field.value !== 'admin',
+                                    },
+                                  )}
+                                >
+                                  <RadioGroupItem
+                                    value="admin"
+                                    id="system-role-admin"
+                                  />
+                                  <div className="space-y-1">
+                                    <div className="font-medium">
+                                      {t('adminRole')}
+                                    </div>
+                                    <div className="text-xs text-text-secondary">
+                                      {t('adminRoleDescription')}
+                                    </div>
+                                  </div>
+                                </label>
+                                <label
+                                  htmlFor="system-role-user"
+                                  className={cn(
+                                    'flex items-start gap-3 rounded-xl border px-4 py-4 cursor-pointer transition-colors',
+                                    {
+                                      'border-accent-primary bg-accent-primary/10':
+                                        field.value === 'user',
+                                      'border-border-button bg-bg-card':
+                                        field.value !== 'user',
+                                    },
+                                  )}
+                                >
+                                  <RadioGroupItem
+                                    value="user"
+                                    id="system-role-user"
+                                  />
+                                  <div className="space-y-1">
+                                    <div className="font-medium">
+                                      {t('userRole')}
+                                    </div>
+                                    <div className="text-xs text-text-secondary">
+                                      {t('userRoleDescription')}
+                                    </div>
+                                  </div>
+                                </label>
+                              </RadioGroup>
                             </FormControl>
                             <FormMessage />
                           </FormItem>

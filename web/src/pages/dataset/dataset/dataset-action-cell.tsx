@@ -27,7 +27,8 @@ const FunctionMap = {
 export function DatasetActionCell({
   record,
   showRenameModal,
-}: { record: IDocumentInfo } & UseRenameDocumentShowType) {
+  readOnly = false,
+}: { record: IDocumentInfo; readOnly?: boolean } & UseRenameDocumentShowType) {
   const { id, run, type } = record;
   const isRunning = isParserRunning(run);
   const isVirtualDocument = type === DocumentType.Virtual;
@@ -51,21 +52,11 @@ export function DatasetActionCell({
 
   return (
     <section className="flex gap-4 items-center text-text-sub-title-invert opacity-0 group-hover:opacity-100 transition-opacity">
-      <Button
-        variant="transparent"
-        className="border-none hover:bg-bg-card text-text-primary"
-        size={'sm'}
-        disabled={isRunning}
-        onClick={handleRename}
-      >
-        <PenLine />
-      </Button>
       <HoverCard>
         <HoverCardTrigger>
           <Button
             variant="transparent"
             className="border-none hover:bg-bg-card text-text-primary"
-            disabled={isRunning}
             size={'sm'}
           >
             <Eye />
@@ -92,7 +83,19 @@ export function DatasetActionCell({
         </HoverCardContent>
       </HoverCard>
 
-      {isVirtualDocument || (
+      {readOnly || (
+        <Button
+          variant="transparent"
+          className="border-none hover:bg-bg-card text-text-primary"
+          size={'sm'}
+          disabled={isRunning}
+          onClick={handleRename}
+        >
+          <PenLine />
+        </Button>
+      )}
+
+      {readOnly || isVirtualDocument || (
         <Button
           variant="transparent"
           className="border-none hover:bg-bg-card text-text-primary"
@@ -103,16 +106,18 @@ export function DatasetActionCell({
           <Download />
         </Button>
       )}
-      <ConfirmDeleteDialog onOk={handleRemove}>
-        <Button
-          variant="transparent"
-          className="border-none hover:bg-bg-card text-text-primary"
-          size={'sm'}
-          disabled={isRunning}
-        >
-          <Trash2 />
-        </Button>
-      </ConfirmDeleteDialog>
+      {readOnly || (
+        <ConfirmDeleteDialog onOk={handleRemove}>
+          <Button
+            variant="transparent"
+            className="border-none hover:bg-bg-card text-text-primary"
+            size={'sm'}
+            disabled={isRunning}
+          >
+            <Trash2 />
+          </Button>
+        </ConfirmDeleteDialog>
+      )}
     </section>
   );
 }

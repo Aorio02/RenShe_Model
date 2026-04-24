@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { IDocumentInfo } from '@/interfaces/database/document';
+import { cn } from '@/lib/utils';
 import { CircleX } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -45,9 +46,11 @@ export function ParsingStatusCell({
   showChangeParserModal,
   // showSetMetaModal,
   showLog,
+  readOnly = false,
 }: {
   record: IDocumentInfo;
   showLog: (record: IDocumentInfo) => void;
+  readOnly?: boolean;
 } & UseChangeDocumentParserShowType) {
   const { t } = useTranslation();
   const {
@@ -59,7 +62,7 @@ export function ParsingStatusCell({
     chunk_num,
     id,
   } = record;
-  const operationIcon = IconMap[run];
+  const operationIcon = IconMap[run as keyof typeof IconMap];
   const p = Number((progress * 100).toFixed(2));
   const {
     handleRunDocumentByIds,
@@ -84,6 +87,11 @@ export function ParsingStatusCell({
   const showParse = useMemo(() => {
     return record.type !== DocumentType.Virtual;
   }, [record]);
+  const parserName = pipeline_id
+    ? pipeline_name || pipeline_id
+    : parser_id === 'naive'
+      ? 'general'
+      : parser_id;
 
   const handleShowLog = (record: IDocumentInfo) => {
     showLog(record);
@@ -91,57 +99,59 @@ export function ParsingStatusCell({
   return (
     <section className="flex gap-8 items-center">
       <div className="text-ellipsis w-[100px] flex items-center justify-between">
-        <DropdownMenu>
-          <DropdownMenuTrigger>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="border-none truncate max-w-32 cursor-pointer px-2 py-1 rounded-sm hover:bg-bg-card">
-                  {pipeline_id
-                    ? pipeline_name || pipeline_id
-                    : parser_id === 'naive'
-                      ? 'general'
-                      : parser_id}
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {pipeline_id
-                    ? pipeline_name || pipeline_id
-                    : parser_id === 'naive'
-                      ? 'general'
-                      : parser_id}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem onClick={handleShowChangeParserModal}>
-              {t('knowledgeDetails.dataPipeline')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {readOnly ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="border-none truncate max-w-32 px-2 py-1 rounded-sm">
+                {parserName}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{parserName}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="border-none truncate max-w-32 cursor-pointer px-2 py-1 rounded-sm hover:bg-bg-card">
+                    {parserName}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{parserName}</p>
+                </TooltipContent>
+              </Tooltip>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={handleShowChangeParserModal}>
+                {t('knowledgeDetails.dataPipeline')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {showParse && (
         <div className="flex items-center gap-3">
           <Separator orientation="vertical" className="h-2.5" />
-          {!isParserRunning(run) && (
-            // <ReparseDialog
-            //   hidden={isZeroChunk || isRunning}
-            //   handleOperationIconClick={handleOperationIconClick}
-            //   chunk_num={chunk_num}
-            // >
-            <div
-              className="cursor-pointer flex items-center gap-3"
-              onClick={() => {
-                showReparseDialogModal();
-              }}
-            >
-              {!isParserRunning(run) && operationIcon}
-            </div>
-            // {/* </ReparseDialog> */}
-          )}
-          {isParserRunning(run) ? (
+          {readOnly ? (
+            isParserRunning(run) ? (
+              <div
+                className="flex items-center gap-1 cursor-pointer"
+                onClick={() => handleShowLog(record)}
+              >
+                <Progress value={p} className="h-1 flex-1 min-w-10" />
+                {p}%
+              </div>
+            ) : (
+              <ParsingCard
+                record={record}
+                handleShowLog={handleShowLog}
+              ></ParsingCard>
+            )
+          ) : isParserRunning(run) ? (
             <>
               <div
                 className="flex items-center gap-1 cursor-pointer"
@@ -165,14 +175,26 @@ export function ParsingStatusCell({
               </div>
             </>
           ) : (
-            <ParsingCard
-              record={record}
-              handleShowLog={handleShowLog}
-            ></ParsingCard>
+            <>
+              <div
+                className={cn('cursor-pointer flex items-center gap-3', {
+                  hidden: isParserRunning(run),
+                })}
+                onClick={() => {
+                  showReparseDialogModal();
+                }}
+              >
+                {!isParserRunning(run) && operationIcon}
+              </div>
+              <ParsingCard
+                record={record}
+                handleShowLog={handleShowLog}
+              ></ParsingCard>
+            </>
           )}
         </div>
       )}
-      {reparseDialogVisible && (
+      {!readOnly && reparseDialogVisible && (
         <ReparseDialog
           hidden={
             (isZeroChunk && !record?.parser_config?.enable_metadata) ||

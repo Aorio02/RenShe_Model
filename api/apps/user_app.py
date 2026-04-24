@@ -27,11 +27,12 @@ from quart import make_response, redirect, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from api.apps.auth import get_auth_client
-from api.db import FileType, UserTenantRole
+from api.db import FileType, SystemRole, UserTenantRole
 from api.db.db_models import TenantLLM
 from api.db.services.file_service import FileService
 from api.db.services.llm_service import get_init_tenant_llm
 from api.db.services.tenant_llm_service import TenantLLMService
+from api.db.services.user_system_role_service import UserSystemRoleService
 from api.db.services.user_service import TenantService, UserService, UserTenantService
 from common.time_utils import current_timestamp, datetime_format, get_format_time
 from common.misc_utils import download_img, get_uuid
@@ -60,6 +61,23 @@ from api.utils.web_utils import (
 )
 from common import settings
 from common.http_client import async_request
+
+SELF_REGISTER_SYSTEM_ROLES = {
+    SystemRole.ADMIN.value,
+    SystemRole.USER.value,
+}
+
+
+def get_system_role_for_user(user):
+    return UserSystemRoleService.get_role_by_user_id(
+        user.id, fallback_is_superuser=bool(getattr(user, "is_superuser", False))
+    )
+
+
+def build_user_response_data(user):
+    user_dict = dict(user.to_dict())
+    user_dict["system_role"] = get_system_role_for_user(user)
+    return user_dict
 
 
 @manager.route("/login", methods=["POST", "GET"])  # noqa: F821
@@ -124,12 +142,12 @@ async def login():
             message="This account has been disabled, please contact the administrator!",
         )
     elif user:
-        response_data = user.to_json()
         user.access_token = get_uuid()
         login_user(user)
         user.update_time = current_timestamp()
         user.update_date = datetime_format(datetime.now())
         user.save()
+        response_data = build_user_response_data(user)
         msg = "Welcome back!"
 
         return await construct_response(data=response_data, auth=user.get_id(), message=msg)
@@ -626,10 +644,14 @@ async def user_profile():
               type: string
               description: User email.
     """
-    return get_json_result(data=current_user.to_dict())
+    return get_json_result(data=build_user_response_data(current_user))
 
 
 def rollback_user_registration(user_id):
+    try:
+        UserSystemRoleService.delete_by_user_id(user_id)
+    except Exception:
+        pass
     try:
         UserService.delete_by_id(user_id)
     except Exception:
@@ -651,6 +673,8 @@ def rollback_user_registration(user_id):
 
 
 def user_register(user_id, user):
+    system_role = user.pop("system_role", SystemRole.USER.value)
+    user["is_superuser"] = system_role == SystemRole.SUPER_ADMIN.value
     user["id"] = user_id
     tenant = {
         "id": user_id,
@@ -684,6 +708,7 @@ def user_register(user_id, user):
 
     if not UserService.save(**user):
         return None
+    UserSystemRoleService.save_or_update_role(user_id, system_role)
     TenantService.insert(**tenant)
     UserTenantService.insert(**usr_tenant)
     TenantLLMService.insert_many(tenant_llm)
@@ -751,6 +776,13 @@ async def user_add():
 
     # Construct user info data
     nickname = req["nickname"]
+    system_role = req.get("system_role", SystemRole.USER.value)
+    if system_role not in SELF_REGISTER_SYSTEM_ROLES:
+        return get_json_result(
+            data=False,
+            message="Only admin and user roles can be selected during registration.",
+            code=RetCode.OPERATING_ERROR,
+        )
     user_dict = {
         "access_token": get_uuid(),
         "email": email_address,
@@ -759,6 +791,7 @@ async def user_add():
         "login_channel": "password",
         "last_login_time": get_format_time(),
         "is_superuser": False,
+        "system_role": system_role,
     }
 
     user_id = get_uuid()
@@ -771,7 +804,7 @@ async def user_add():
         user = users[0]
         login_user(user)
         return await construct_response(
-            data=user.to_json(),
+            data=build_user_response_data(user),
             auth=user.get_id(),
             message=f"{nickname}, welcome aboard!",
         )
@@ -1080,6 +1113,6 @@ async def forget_reset_password():
         pass
 
     msg = "Password reset successful. Logged in."
-    return await construct_response(data=user.to_json(), auth=user.get_id(), message=msg)
-
-
+    return await construct_response(
+        data=build_user_response_data(user), auth=user.get_id(), message=msg
+    )

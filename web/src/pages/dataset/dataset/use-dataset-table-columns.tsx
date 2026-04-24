@@ -30,6 +30,7 @@ type UseDatasetTableColumnsType = UseChangeDocumentParserShowType &
   UseRenameDocumentShowType & {
     showLog: (record: IDocumentInfo) => void;
     showManageMetadataModal: (config: ShowManageMetadataModalProps) => void;
+    readOnly?: boolean;
   };
 
 export function useDatasetTableColumns({
@@ -37,6 +38,7 @@ export function useDatasetTableColumns({
   showRenameModal,
   showManageMetadataModal,
   showLog,
+  readOnly = false,
 }: UseDatasetTableColumnsType) {
   const { t } = useTranslation('translation', {
     keyPrefix: 'knowledgeDetails',
@@ -45,8 +47,10 @@ export function useDatasetTableColumns({
   const { navigateToChunkParsedResult } = useNavigatePage();
   const { setDocumentStatus } = useSetDocumentStatus();
 
-  const columns: ColumnDef<IDocumentInfo>[] = [
-    {
+  const columns: ColumnDef<IDocumentInfo>[] = [];
+
+  if (!readOnly) {
+    columns.push({
       id: 'select',
       header: ({ table }) => (
         <Checkbox
@@ -67,21 +71,22 @@ export function useDatasetTableColumns({
       ),
       enableSorting: false,
       enableHiding: false,
-    },
+    });
+  }
+
+  columns.push(
     {
       accessorKey: 'name',
-      header: ({ column }) => {
-        return (
-          <Button
-            variant="transparent"
-            className="border-none"
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          >
-            {t('name')}
-            <ArrowUpDown />
-          </Button>
-        );
-      },
+      header: ({ column }) => (
+        <Button
+          variant="transparent"
+          className="border-none"
+          onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+        >
+          {t('name')}
+          <ArrowUpDown />
+        </Button>
+      ),
       meta: { cellClassName: 'max-w-[20vw]' },
       cell: ({ row }) => {
         const name: string = row.getValue('name');
@@ -109,18 +114,16 @@ export function useDatasetTableColumns({
     },
     {
       accessorKey: 'create_time',
-      header: ({ column }) => {
-        return (
-          <Button
-            variant="transparent"
-            className="border-none"
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          >
-            {t('uploadDate')}
-            <ArrowUpDown />
-          </Button>
-        );
-      },
+      header: ({ column }) => (
+        <Button
+          variant="transparent"
+          className="border-none"
+          onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+        >
+          {t('uploadDate')}
+          <ArrowUpDown />
+        </Button>
+      ),
       cell: ({ row }) => (
         <div className="lowercase">
           {formatDate(row.getValue('create_time'))}
@@ -154,6 +157,15 @@ export function useDatasetTableColumns({
       header: t('enabled'),
       cell: ({ row }) => {
         const id = row.original.id;
+
+        if (readOnly) {
+          return (
+            <div className="capitalize">
+              {row.getValue('status') === '1' ? t('enabled') : t('disabled')}
+            </div>
+          );
+        }
+
         return (
           <Switch
             checked={row.getValue('status') === '1'}
@@ -176,6 +188,11 @@ export function useDatasetTableColumns({
       header: t('metadata.metadata'),
       cell: ({ row }) => {
         const length = Object.keys(row.getValue('meta_fields') || {}).length;
+
+        if (readOnly) {
+          return <div className="capitalize">{length + ' fields'}</div>;
+        }
+
         return (
           <div
             className="capitalize cursor-pointer"
@@ -210,16 +227,14 @@ export function useDatasetTableColumns({
     {
       accessorKey: 'run',
       header: t('Parse'),
-      // meta: { cellClassName: 'min-w-[20vw]' },
-      cell: ({ row }) => {
-        return (
-          <ParsingStatusCell
-            record={row.original}
-            showChangeParserModal={showChangeParserModal}
-            showLog={showLog}
-          ></ParsingStatusCell>
-        );
-      },
+      cell: ({ row }) => (
+        <ParsingStatusCell
+          record={row.original}
+          showChangeParserModal={showChangeParserModal}
+          showLog={showLog}
+          readOnly={readOnly}
+        ></ParsingStatusCell>
+      ),
     },
     {
       id: 'actions',
@@ -232,11 +247,12 @@ export function useDatasetTableColumns({
           <DatasetActionCell
             record={record}
             showRenameModal={showRenameModal}
+            readOnly={readOnly}
           ></DatasetActionCell>
         );
       },
     },
-  ];
+  );
 
   return columns;
 }

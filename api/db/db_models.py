@@ -639,6 +639,28 @@ class User(DataBaseModel, AuthUser):
         db_table = "user"
 
 
+class UserSystemRole(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    user_id = CharField(max_length=32, null=False, unique=True, index=True)
+    role = CharField(
+        max_length=32,
+        null=False,
+        help_text="SystemRole",
+        default="user",
+        index=True,
+    )
+    status = CharField(
+        max_length=1,
+        null=True,
+        help_text="is it validate(0: wasted, 1: validate)",
+        default="1",
+        index=True,
+    )
+
+    class Meta:
+        db_table = "user_system_role"
+
+
 class Tenant(DataBaseModel):
     id = CharField(max_length=32, primary_key=True)
     name = CharField(max_length=100, null=True, help_text="Tenant name", index=True)

@@ -15,6 +15,7 @@ export interface ILoginRequestBody {
 
 export interface IRegisterRequestBody extends ILoginRequestBody {
   nickname: string;
+  system_role?: string;
 }
 
 export interface ILoginChannel {
@@ -64,6 +65,7 @@ export const useLogin = () => {
           avatar: data.avatar,
           name: data.nickname,
           email: data.email,
+          system_role: data.system_role,
         };
         authorizationUtil.setItems({
           Authorization: authorization,
@@ -91,6 +93,7 @@ export const useRegister = () => {
       email: string;
       password: string;
       nickname: string;
+      system_role?: string;
     }) => {
       const { data = {} } = await userService.register(params);
       if (data.code === 0) {

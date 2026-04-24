@@ -25,6 +25,12 @@ class UserTenantRole(StrEnum):
     INVITE = 'invite'
 
 
+class SystemRole(StrEnum):
+    SUPER_ADMIN = 'super_admin'
+    ADMIN = 'admin'
+    USER = 'user'
+
+
 class TenantPermission(StrEnum):
     ME = 'me'
     TEAM = 'team'

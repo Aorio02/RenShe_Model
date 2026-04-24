@@ -21,7 +21,7 @@ import time
 import uuid
 from copy import deepcopy
 
-from api.db import UserTenantRole
+from api.db import SystemRole, UserTenantRole
 from api.db.db_models import init_database_tables as init_web_db, LLMFactories, LLM, TenantLLM
 from api.db.services import UserService
 from api.db.services.canvas_service import CanvasTemplateService
@@ -29,6 +29,7 @@ from api.db.services.document_service import DocumentService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.tenant_llm_service import LLMFactoriesService, TenantLLMService
 from api.db.services.llm_service import LLMService, LLMBundle, get_init_tenant_llm
+from api.db.services.user_system_role_service import UserSystemRoleService
 from api.db.services.user_service import TenantService, UserTenantService
 from api.db.services.system_settings_service import SystemSettingsService
 from api.db.joint_services.memory_message_service import init_message_id_sequence, init_memory_size_cache
@@ -72,6 +73,9 @@ def init_superuser(nickname=DEFAULT_SUPERUSER_NICKNAME, email=DEFAULT_SUPERUSER_
     if not UserService.save(**user_info):
         logging.error("can't init admin.")
         return
+    UserSystemRoleService.save_or_update_role(
+        user_info["id"], SystemRole.SUPER_ADMIN.value
+    )
     TenantService.insert(**tenant)
     UserTenantService.insert(**usr_tenant)
     TenantLLMService.insert_many(tenant_llm)

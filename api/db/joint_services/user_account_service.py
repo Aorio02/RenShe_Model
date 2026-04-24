@@ -17,7 +17,7 @@ import logging
 import uuid
 
 from api.utils.api_utils import group_by
-from api.db import FileType, UserTenantRole
+from api.db import FileType, SystemRole, UserTenantRole
 from api.db.services.api_service import APITokenService, API4ConversationService
 from api.db.services.canvas_service import UserCanvasService
 from api.db.services.conversation_service import ConversationService
@@ -33,6 +33,7 @@ from api.db.services.search_service import SearchService
 from api.db.services.task_service import TaskService
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.user_canvas_version import UserCanvasVersionService
+from api.db.services.user_system_role_service import UserSystemRoleService
 from api.db.services.user_service import TenantService, UserService, UserTenantService
 from api.db.services.memory_service import MemoryService
 from memory.services.messages import MessageService
@@ -48,7 +49,7 @@ def create_new_user(user_info: dict) -> dict:
         "nickname": <str, "name">,
         "password": <decrypted password>,
         "login_channel": <enum, "password">,
-        "is_superuser": <bool, role == "admin">,
+        "system_role": <enum, super_admin|admin|user>,
     }
     :return: {
         "success": <bool>,
@@ -56,9 +57,18 @@ def create_new_user(user_info: dict) -> dict:
     }
     """
     # generate user_id and access_token for user
-    user_id = uuid.uuid1().hex
+    system_role = user_info.pop("system_role", None)
+    if not system_role:
+        system_role = (
+            SystemRole.SUPER_ADMIN.value
+            if user_info.get("is_superuser")
+            else SystemRole.USER.value
+        )
+    user_info["is_superuser"] = system_role == SystemRole.SUPER_ADMIN.value
+
+    user_id = user_info.get("id") or uuid.uuid1().hex
     user_info['id'] = user_id
-    user_info['access_token'] = uuid.uuid1().hex
+    user_info.setdefault('access_token', uuid.uuid1().hex)
     # construct tenant info
     tenant = {
         "id": user_id,
@@ -94,6 +104,7 @@ def create_new_user(user_info: dict) -> dict:
         if not UserService.save(**user_info):
             return {"success": False}
 
+        UserSystemRoleService.save_or_update_role(user_id, system_role)
         TenantService.insert(**tenant)
         UserTenantService.insert(**usr_tenant)
         TenantLLMService.insert_many(tenant_llm)
@@ -107,6 +118,10 @@ def create_new_user(user_info: dict) -> dict:
     except Exception as create_error:
         logging.exception(create_error)
         # rollback
+        try:
+            UserSystemRoleService.delete_by_user_id(user_id)
+        except Exception as e:
+            logging.exception(e)
         try:
             TenantService.delete_by_id(user_id)
         except Exception as e:

@@ -78,6 +78,13 @@ export default {
       signUpTip: 'Already have an account?',
       nicknameLabel: 'Nickname',
       nicknamePlaceholder: 'Please input nickname',
+      roleLabel: 'User role',
+      roleRequired: 'Please select a user role',
+      adminRole: 'Admin',
+      adminRoleDescription:
+        'Can see dataset and file entries, but dataset files are read-only.',
+      userRole: 'User',
+      userRoleDescription: 'Can only see the home page and chats.',
       register: 'Create an account',
       continue: 'Continue',
       title: 'A leading RAG engine for LLM context',
