@@ -257,9 +257,9 @@ class UserTenantService(CommonService):
             if not user_tenants:
                 return user_id
             for ut in user_tenants:
-                if ut.role != UserTenantRole.OWNER:
+                if ut.role == UserTenantRole.NORMAL:
                     return ut.tenant_id
-            return user_tenants[0].tenant_id
+            return user_id
         except peewee.DoesNotExist:
             return user_id
 

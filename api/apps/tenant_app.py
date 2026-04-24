@@ -78,7 +78,7 @@ async def create(tenant_id):
         user_id=user_id_to_invite,
         tenant_id=tenant_id,
         invited_by=current_user.id,
-        role=UserTenantRole.INVITE,
+        role=UserTenantRole.NORMAL,
         status=StatusEnum.VALID.value)
 
     try:
