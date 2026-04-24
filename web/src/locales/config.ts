@@ -1,5 +1,4 @@
 import i18n from 'i18next';
-import LanguageDetector from 'i18next-browser-languagedetector';
 import { initReactI18next } from 'react-i18next';
 
 import { LanguageAbbreviation } from '@/constants/common';
@@ -72,14 +71,8 @@ export const translationTable = createTranslationTable(
 );
 i18n
   .use(initReactI18next)
-  .use(LanguageDetector)
   .init({
-    detection: {
-      lookupLocalStorage: 'lng',
-      order: ['localStorage', 'navigator', 'cookie'],
-      caches: ['localStorage'],
-    },
-    supportedLngs: Object.values(LanguageAbbreviation),
+    supportedLngs: [LanguageAbbreviation.Zh],
     resources,
     lng: LanguageAbbreviation.Zh,
     fallbackLng: LanguageAbbreviation.Zh,

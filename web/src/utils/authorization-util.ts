@@ -22,7 +22,7 @@ const storage = {
     localStorage.setItem(Token, value);
   },
   setUserInfo: (value: string | Record<string, unknown>) => {
-    let valueStr = typeof value !== 'string' ? JSON.stringify(value) : value;
+    const valueStr = typeof value !== 'string' ? JSON.stringify(value) : value;
     localStorage.setItem(UserInfo, valueStr);
   },
   setItems: (pairs: Record<string, string>) => {
@@ -39,10 +39,11 @@ const storage = {
     });
   },
   setLanguage: (lng: string) => {
-    localStorage.setItem('lng', lng);
+    void lng;
+    localStorage.setItem('lng', 'zh');
   },
   getLanguage: (): string => {
-    return localStorage.getItem('lng') as string;
+    return localStorage.getItem('lng') || 'zh';
   },
 };
 

@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { en } from './locales/en';
+import { zh } from './locales/zh';
 import type { Translation } from './translation-keys.ts';
 
-export const TranslationContext = createContext<Translation>(en);
+export const TranslationContext = createContext<Translation>(zh);

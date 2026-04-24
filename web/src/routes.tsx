@@ -347,7 +347,7 @@ const routeConfig = [
       },
       {
         path: '/user-setting/locale',
-        Component: lazy(() => import('@/pages/user-setting/setting-locale')),
+        element: <Navigate to={`/user-setting${Routes.Team}`} replace />,
       },
       {
         path: '/user-setting/model',

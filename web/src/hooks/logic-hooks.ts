@@ -1,6 +1,6 @@
 import { Authorization } from '@/constants/authorization';
 import { MessageType } from '@/constants/chat';
-import { LanguageTranslationMap } from '@/constants/common';
+import { LanguageAbbreviation } from '@/constants/common';
 import { Pagination } from '@/interfaces/common';
 import { ResponseType } from '@/interfaces/database/base';
 import {
@@ -56,11 +56,9 @@ export const useChangeLanguage = () => {
   const { i18n } = useTranslation();
   const { saveSetting } = useSaveSetting();
 
-  const changeLanguage = (lng: string) => {
-    i18n.changeLanguage(
-      LanguageTranslationMap[lng as keyof typeof LanguageTranslationMap],
-    );
-    saveSetting({ language: lng });
+  const changeLanguage = () => {
+    i18n.changeLanguage(LanguageAbbreviation.Zh);
+    saveSetting({ language: 'Chinese' });
   };
 
   return changeLanguage;

@@ -1,12 +1,7 @@
 import HighLightMarkdown from '@/components/highlight-markdown';
 import message from '@/components/ui/message';
 import { Modal } from '@/components/ui/modal/modal';
-import { RAGFlowSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import {
-  LanguageAbbreviation,
-  LanguageAbbreviationMap,
-} from '@/constants/common';
 import { useTranslate } from '@/hooks/common-hooks';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -25,26 +20,14 @@ const EmbedAppModal = (props: IEmbedAppModalProps) => {
   const { open, setOpen, token = '', from, url, tenantId, beta = '' } = props;
 
   const [hideAvatar, setHideAvatar] = useState(false);
-  const [locale, setLocale] = useState('');
-
-  const languageOptions = useMemo(() => {
-    return Object.values(LanguageAbbreviation).map((x) => ({
-      label: LanguageAbbreviationMap[x],
-      value: x,
-    }));
-  }, []);
 
   const generateIframeSrc = useCallback(() => {
-    // const { visibleAvatar, locale } = values;
     let src = `${location.origin}${url}?shared_id=${token}&from=${from}&auth=${beta}&tenantId=${tenantId}`;
     if (hideAvatar) {
       src += '&visible_avatar=1';
     }
-    if (locale) {
-      src += `&locale=${locale}`;
-    }
     return src;
-  }, [beta, from, token, hideAvatar, locale, url, tenantId]);
+  }, [beta, from, token, hideAvatar, url, tenantId]);
 
   // ... existing code ...
   const text = useMemo(() => {
@@ -82,19 +65,6 @@ const EmbedAppModal = (props: IEmbedAppModalProps) => {
             />
           </div>
         </div>
-
-        {/* Locale Select */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium mb-2">
-            {t('locale')}
-          </label>
-          <RAGFlowSelect
-            placeholder="Select a locale"
-            value={locale}
-            onChange={(value) => setLocale(value)}
-            options={languageOptions}
-          ></RAGFlowSelect>
-        </div>
         {/* Embed Code */}
         <div className="mb-6">
           <label className="block text-sm font-medium mb-2">
@@ -123,7 +93,7 @@ const EmbedAppModal = (props: IEmbedAppModalProps) => {
                 message.success(t('copySuccess'));
               }}
               className="ml-2 p-2 hover:text-white transition-colors"
-              title="Copy ID"
+              title="复制 ID"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"

@@ -5,6 +5,7 @@ import MessageItem from '@/components/next-message-item';
 import PdfSheet from '@/components/pdf-drawer';
 import { useClickDrawer } from '@/components/pdf-drawer/hooks';
 import { useSyncThemeFromParams } from '@/components/theme-provider';
+import { LanguageAbbreviation } from '@/constants/common';
 import { MessageType } from '@/constants/chat';
 import { useUploadCanvasFileWithProgress } from '@/hooks/use-agent-request';
 import { cn } from '@/lib/utils';
@@ -87,8 +88,8 @@ const ChatContainer = () => {
     );
 
   React.useEffect(() => {
-    if (locale && i18n.language !== locale) {
-      i18n.changeLanguage(locale);
+    if (i18n.language !== LanguageAbbreviation.Zh) {
+      i18n.changeLanguage(LanguageAbbreviation.Zh);
     }
   }, [locale, visibleAvatar]);
 
@@ -113,7 +114,7 @@ const ChatContainer = () => {
     showBeginParameterDialog();
   };
   if (!conversationId) {
-    return <div>empty</div>;
+    return <div>空会话</div>;
   }
 
   return (
@@ -142,7 +143,7 @@ const ChatContainer = () => {
                     setCurrentMessageId={setCurrentMessageId}
                     key={buildMessageUuidWithRole(message)}
                     item={message}
-                    nickname="You"
+                    nickname="你"
                     reference={findReferenceByMessageId(message.id)}
                     loading={
                       message.role === MessageType.Assistant &&

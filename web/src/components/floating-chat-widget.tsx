@@ -1,5 +1,6 @@
 import PdfSheet from '@/components/pdf-drawer';
 import { useClickDrawer } from '@/components/pdf-drawer/hooks';
+import { LanguageAbbreviation } from '@/constants/common';
 import { MessageType, SharedFrom } from '@/constants/chat';
 import { useFetchExternalAgentInputs } from '@/hooks/use-agent-request';
 import { useFetchExternalChatInfo } from '@/hooks/use-chat-request';
@@ -87,7 +88,7 @@ const FloatingChatWidget = () => {
 
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.3);
-    } catch (error) {
+    } catch {
       // Silent fail if audio not supported
     }
   }, []);
@@ -114,7 +115,7 @@ const FloatingChatWidget = () => {
 
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.2);
-    } catch (error) {
+    } catch {
       // Silent fail if audio not supported
     }
   }, []);
@@ -133,8 +134,8 @@ const FloatingChatWidget = () => {
       );
     }, 50);
 
-    if (locale && i18n.language !== locale) {
-      i18n.changeLanguage(locale);
+    if (i18n.language !== LanguageAbbreviation.Zh) {
+      i18n.changeLanguage(LanguageAbbreviation.Zh);
     }
 
     return () => clearTimeout(timer);

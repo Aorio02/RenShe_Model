@@ -42,6 +42,7 @@ type LoginFormValues = {
   system_role?: string;
   email: string;
   password: string;
+  confirmPassword?: string;
   remember?: boolean;
 };
 
@@ -95,16 +96,18 @@ const Login = () => {
       system_role: z.string().optional(),
       email: z
         .string()
-        .email()
-        .min(1, { message: t('emailPlaceholder') }),
+        .trim()
+        .min(1, { message: t('emailPlaceholder') })
+        .pipe(z.string().email({ message: t('emailInvalid') })),
       password: z.string().min(1, { message: t('passwordPlaceholder') }),
+      confirmPassword: z.string().optional(),
       remember: z.boolean().optional(),
     })
     .superRefine((data, ctx) => {
       if (title === 'register' && !data.nickname) {
         ctx.addIssue({
           path: ['nickname'],
-          message: 'nicknamePlaceholder',
+          message: t('nicknamePlaceholder'),
           code: z.ZodIssueCode.custom,
         });
       }
@@ -113,6 +116,26 @@ const Login = () => {
         ctx.addIssue({
           path: ['system_role'],
           message: t('roleRequired'),
+          code: z.ZodIssueCode.custom,
+        });
+      }
+
+      if (title === 'register' && !data.confirmPassword) {
+        ctx.addIssue({
+          path: ['confirmPassword'],
+          message: t('confirmPasswordRequired'),
+          code: z.ZodIssueCode.custom,
+        });
+      }
+
+      if (
+        title === 'register' &&
+        data.confirmPassword &&
+        data.password !== data.confirmPassword
+      ) {
+        ctx.addIssue({
+          path: ['confirmPassword'],
+          message: t('confirmPasswordMismatch'),
           code: z.ZodIssueCode.custom,
         });
       }
@@ -294,13 +317,8 @@ const Login = () => {
                                     value="admin"
                                     id="system-role-admin"
                                   />
-                                  <div className="space-y-1">
-                                    <div className="font-medium">
-                                      {t('adminRole')}
-                                    </div>
-                                    <div className="text-xs text-text-secondary">
-                                      {t('adminRoleDescription')}
-                                    </div>
+                                  <div className="font-medium">
+                                    {t('adminRole')}
                                   </div>
                                 </label>
                                 <label
@@ -319,13 +337,8 @@ const Login = () => {
                                     value="user"
                                     id="system-role-user"
                                   />
-                                  <div className="space-y-1">
-                                    <div className="font-medium">
-                                      {t('userRole')}
-                                    </div>
-                                    <div className="text-xs text-text-secondary">
-                                      {t('userRoleDescription')}
-                                    </div>
+                                  <div className="font-medium">
+                                    {t('userRole')}
                                   </div>
                                 </label>
                               </RadioGroup>
@@ -371,6 +384,29 @@ const Login = () => {
                         </FormItem>
                       )}
                     />
+
+                    {title === 'register' && (
+                      <FormField
+                        control={form.control}
+                        name="confirmPassword"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel required>
+                              {t('confirmPasswordLabel')}
+                            </FormLabel>
+                            <FormControl>
+                              <Input
+                                type={'password'}
+                                placeholder={t('confirmPasswordPlaceholder')}
+                                autoComplete="new-password"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
 
                     {title === 'login' && (
                       <FormField

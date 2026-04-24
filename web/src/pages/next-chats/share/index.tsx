@@ -4,6 +4,7 @@ import MessageItem from '@/components/message-item';
 import PdfSheet from '@/components/pdf-drawer';
 import { useClickDrawer } from '@/components/pdf-drawer/hooks';
 import { useSyncThemeFromParams } from '@/components/theme-provider';
+import { LanguageAbbreviation } from '@/constants/common';
 import { MessageType, SharedFrom } from '@/constants/chat';
 import { useFetchFlowSSE } from '@/hooks/use-agent-request';
 import {
@@ -53,15 +54,15 @@ const ChatContainer = () => {
       : useFetchNextConversationSSE;
   }, [from]);
   React.useEffect(() => {
-    if (locale && i18n.language !== locale) {
-      i18n.changeLanguage(locale);
+    if (i18n.language !== LanguageAbbreviation.Zh) {
+      i18n.changeLanguage(LanguageAbbreviation.Zh);
     }
   }, [locale, visibleAvatar]);
 
   const { data: avatarData } = useFetchAvatar();
 
   if (!conversationId) {
-    return <div>empty</div>;
+    return <div>空会话</div>;
   }
 
   return (
@@ -86,7 +87,7 @@ const ChatContainer = () => {
                     key={buildMessageUuidWithRole(message)}
                     avatarDialog={avatarData?.avatar}
                     item={message}
-                    nickname="You"
+                    nickname="你"
                     reference={buildMessageItemReference(
                       {
                         message: derivedMessages,

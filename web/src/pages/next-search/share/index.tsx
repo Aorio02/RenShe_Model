@@ -1,4 +1,5 @@
 import { RAGFlowAvatar } from '@/components/ragflow-avatar';
+import { LanguageAbbreviation } from '@/constants/common';
 import i18n from '@/locales/config';
 import { useEffect, useState } from 'react';
 import {
@@ -23,8 +24,8 @@ export default function ShareSeachPage() {
   );
 
   useEffect(() => {
-    if (locale && i18n.language !== locale) {
-      i18n.changeLanguage(locale);
+    if (i18n.language !== LanguageAbbreviation.Zh) {
+      i18n.changeLanguage(LanguageAbbreviation.Zh);
     }
   }, [locale]);
   return (

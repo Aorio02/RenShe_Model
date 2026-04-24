@@ -1,17 +1,11 @@
-import { useTranslate } from '@/hooks/common-hooks';
-import { DownOutlined, GithubOutlined } from '@ant-design/icons';
-import { Dropdown, MenuProps, Space } from 'antd';
-import camelCase from 'lodash/camelCase';
+import { GithubOutlined } from '@ant-design/icons';
+import { Space } from 'antd';
 import React, { useCallback, useMemo } from 'react';
 import User from '../user';
 
 import { useTheme } from '@/components/theme-provider';
-import { LanguageList, LanguageMap, ThemeEnum } from '@/constants/common';
-import { useChangeLanguage } from '@/hooks/logic-hooks';
-import {
-  useFetchUserInfo,
-  useListTenant,
-} from '@/hooks/use-user-setting-request';
+import { ThemeEnum } from '@/constants/common';
+import { useListTenant } from '@/hooks/use-user-setting-request';
 import { TenantRole } from '@/pages/user-setting/constants';
 import { BellRing, CircleHelp, MoonIcon, SunIcon } from 'lucide-react';
 import { useNavigate } from 'react-router';
@@ -34,31 +28,14 @@ const handleDocHelpCLick = () => {
 };
 
 const RightToolBar = () => {
-  const { t } = useTranslate('common');
-  const changeLanguage = useChangeLanguage();
   const { setTheme, theme } = useTheme();
   const navigate = useNavigate();
-
-  const {
-    data: { language = 'English' },
-  } = useFetchUserInfo();
-
-  const handleItemClick: MenuProps['onClick'] = ({ key }) => {
-    changeLanguage(key);
-  };
 
   const { data } = useListTenant();
 
   const showBell = useMemo(() => {
     return data.some((x) => x.role === TenantRole.Invite);
   }, [data]);
-
-  const items: MenuProps['items'] = LanguageList.map((x) => ({
-    key: x,
-    label: <span>{LanguageMap[x as keyof typeof LanguageMap]}</span>,
-  })).reduce<MenuProps['items']>((pre, cur) => {
-    return [...pre!, { type: 'divider' }, cur];
-  }, []);
 
   const onMoonClick = React.useCallback(() => {
     setTheme(ThemeEnum.Light);
@@ -74,12 +51,6 @@ const RightToolBar = () => {
   return (
     <div className={styled.toolbarWrapper}>
       <Space wrap size={16}>
-        <Dropdown menu={{ items, onClick: handleItemClick }} placement="bottom">
-          <Space className={styled.language}>
-            <b>{t(camelCase(language))}</b>
-            <DownOutlined />
-          </Space>
-        </Dropdown>
         <Circle>
           <GithubOutlined onClick={handleGithubCLick} />
         </Circle>

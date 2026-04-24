@@ -1,6 +1,5 @@
 import CopyToClipboard from '@/components/copy-to-clipboard';
 import HighLightMarkdown from '@/components/highlight-markdown';
-import { SelectWithSearch } from '@/components/originui/select-with-search';
 import {
   Dialog,
   DialogContent,
@@ -19,11 +18,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { SharedFrom } from '@/constants/chat';
-import {
-  LanguageAbbreviation,
-  LanguageAbbreviationMap,
-  ThemeEnum,
-} from '@/constants/common';
+import { ThemeEnum } from '@/constants/common';
 import { useTranslate } from '@/hooks/common-hooks';
 import { IModalProps } from '@/interfaces/common';
 import { Routes } from '@/routes';
@@ -34,7 +29,6 @@ import { z } from 'zod';
 
 const FormSchema = z.object({
   visibleAvatar: z.boolean(),
-  locale: z.string(),
   embedType: z.enum(['fullscreen', 'widget']),
   enableStreaming: z.boolean(),
   theme: z.enum([ThemeEnum.Light, ThemeEnum.Dark]),
@@ -60,7 +54,6 @@ function EmbedDialog({
     resolver: zodResolver(FormSchema),
     defaultValues: {
       visibleAvatar: false,
-      locale: '',
       embedType: 'fullscreen' as const,
       enableStreaming: false,
       theme: ThemeEnum.Light,
@@ -69,15 +62,8 @@ function EmbedDialog({
 
   const values = useWatch({ control: form.control });
 
-  const languageOptions = useMemo(() => {
-    return Object.values(LanguageAbbreviation).map((x) => ({
-      label: LanguageAbbreviationMap[x],
-      value: x,
-    }));
-  }, []);
-
   const generateIframeSrc = useCallback(() => {
-    const { visibleAvatar, locale, embedType, enableStreaming, theme } = values;
+    const { visibleAvatar, embedType, enableStreaming, theme } = values;
     const baseRoute =
       embedType === 'widget'
         ? Routes.ChatWidget
@@ -87,9 +73,6 @@ function EmbedDialog({
     let src = `${location.origin}${baseRoute}?shared_id=${token}&from=${from}&auth=${beta}`;
     if (visibleAvatar) {
       src += '&visible_avatar=1';
-    }
-    if (locale) {
-      src += `&locale=${locale}`;
     }
     if (enableStreaming) {
       src += '&streaming=true';
@@ -162,7 +145,7 @@ function EmbedDialog({
                 name="embedType"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Embed Type</FormLabel>
+                    <FormLabel>嵌入方式</FormLabel>
                     <FormControl>
                       <RadioGroup
                         onValueChange={field.onChange}
@@ -172,13 +155,13 @@ function EmbedDialog({
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="fullscreen" id="fullscreen" />
                           <Label htmlFor="fullscreen" className="text-sm">
-                            Fullscreen Chat (Traditional iframe)
+                            全屏聊天（传统 iframe）
                           </Label>
                         </div>
                         <div className="flex items-center space-x-2">
                           <RadioGroupItem value="widget" id="widget" />
                           <Label htmlFor="widget" className="text-sm">
-                            Floating Widget (Intercom-style)
+                            浮动组件（悬浮对话框）
                           </Label>
                         </div>
                       </RadioGroup>
@@ -193,7 +176,7 @@ function EmbedDialog({
                   name="theme"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Theme</FormLabel>
+                      <FormLabel>主题</FormLabel>
                       <FormControl>
                         <RadioGroup
                           onValueChange={field.onChange}
@@ -206,13 +189,13 @@ function EmbedDialog({
                               id="light"
                             />
                             <Label htmlFor="light" className="text-sm">
-                              Light
+                              浅色
                             </Label>
                           </div>
                           <div className="flex items-center space-x-2">
                             <RadioGroupItem value={ThemeEnum.Dark} id="dark" />
                             <Label htmlFor="dark" className="text-sm">
-                              Dark
+                              深色
                             </Label>
                           </div>
                         </RadioGroup>
@@ -244,7 +227,7 @@ function EmbedDialog({
                   name="enableStreaming"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Enable Streaming Responses</FormLabel>
+                      <FormLabel>启用流式回复</FormLabel>
                       <FormControl>
                         <Switch
                           checked={field.value}
@@ -256,22 +239,6 @@ function EmbedDialog({
                   )}
                 />
               )}
-              <FormField
-                control={form.control}
-                name="locale"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('locale')}</FormLabel>
-                    <FormControl>
-                      <SelectWithSearch
-                        {...field}
-                        options={languageOptions}
-                      ></SelectWithSearch>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
             </form>
           </Form>
           <div className="max-h-[350px] overflow-auto">

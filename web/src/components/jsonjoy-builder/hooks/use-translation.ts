@@ -1,10 +1,10 @@
 import { useContext } from 'react';
-import { en } from '../i18n/locales/en';
+import { zh } from '../i18n/locales/zh';
 import { TranslationContext } from '../i18n/translation-context';
 
 export function useTranslation() {
   const translation = useContext(TranslationContext);
-  return translation ?? en;
+  return translation ?? zh;
 }
 
 export function formatTranslation(

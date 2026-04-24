@@ -1,24 +1,20 @@
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
+import { LanguageAbbreviation } from '@/constants/common';
 import i18n from '@/locales/config';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { configResponsive } from 'ahooks';
-import { App, ConfigProvider, ConfigProviderProps, theme } from 'antd';
-import pt_BR from 'antd/lib/locale/pt_BR';
-import deDE from 'antd/locale/de_DE';
-import enUS from 'antd/locale/en_US';
-import ru_RU from 'antd/locale/ru_RU';
-import vi_VN from 'antd/locale/vi_VN';
+import { App, ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import zh_HK from 'antd/locale/zh_HK';
 import dayjs from 'dayjs';
+import 'dayjs/locale/zh-cn';
 import advancedFormat from 'dayjs/plugin/advancedFormat';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import localeData from 'dayjs/plugin/localeData';
 import weekOfYear from 'dayjs/plugin/weekOfYear';
 import weekYear from 'dayjs/plugin/weekYear';
 import weekday from 'dayjs/plugin/weekday';
-import React, { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { RouterProvider } from 'react-router';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { SidebarProvider } from './components/ui/sidebar';
@@ -46,16 +42,7 @@ dayjs.extend(weekday);
 dayjs.extend(localeData);
 dayjs.extend(weekOfYear);
 dayjs.extend(weekYear);
-
-const AntLanguageMap = {
-  en: enUS,
-  zh: zhCN,
-  'zh-TRADITIONAL': zh_HK,
-  ru: ru_RU,
-  vi: vi_VN,
-  'pt-BR': pt_BR,
-  de: deDE,
-};
+dayjs.locale('zh-cn');
 
 // if (process.env.NODE_ENV === 'development') {
 //   const whyDidYouRender = require('@welldone-software/why-did-you-render');
@@ -79,19 +66,8 @@ const AntLanguageMap = {
 // }
 const queryClient = new QueryClient();
 
-type Locale = ConfigProviderProps['locale'];
-
 function Root({ children }: React.PropsWithChildren) {
   const { theme: themeragflow } = useTheme();
-  const getLocale = (lng: string) =>
-    AntLanguageMap[lng as keyof typeof AntLanguageMap] ?? enUS;
-
-  const [locale, setLocal] = useState<Locale>(getLocale(storage.getLanguage()));
-
-  i18n.on('languageChanged', function (lng: string) {
-    storage.setLanguage(lng);
-    setLocal(getLocale(lng));
-  });
 
   return (
     <>
@@ -105,7 +81,7 @@ function Root({ children }: React.PropsWithChildren) {
               ? theme.darkAlgorithm
               : theme.defaultAlgorithm,
         }}
-        locale={locale}
+        locale={zhCN}
       >
         <SidebarProvider className="h-full">
           <App className="w-full h-dvh relative">{children}</App>
@@ -120,11 +96,8 @@ function Root({ children }: React.PropsWithChildren) {
 
 const RootProvider = ({ children }: React.PropsWithChildren) => {
   useEffect(() => {
-    // Because the language is saved in the backend, a token is required to obtain the api. However, the login page cannot obtain the language through the getUserInfo api, so the language needs to be saved in localstorage.
-    const lng = storage.getLanguage();
-    if (lng) {
-      i18n.changeLanguage(lng);
-    }
+    storage.setLanguage(LanguageAbbreviation.Zh);
+    i18n.changeLanguage(LanguageAbbreviation.Zh);
   }, []);
 
   return (

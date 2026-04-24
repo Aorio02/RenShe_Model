@@ -1,5 +1,4 @@
 import message from '@/components/ui/message';
-import { LanguageTranslationMap } from '@/constants/common';
 import { ResponseGetType } from '@/interfaces/database/base';
 import { IToken } from '@/interfaces/database/chat';
 import { ITenantInfo } from '@/interfaces/database/knowledge';
@@ -48,7 +47,6 @@ const USER_SETTING_STALE_TIME = 5 * 60 * 1000;
 const USER_SETTING_GC_TIME = 30 * 60 * 1000;
 
 export const useFetchUserInfo = (): ResponseGetType<IUserInfo> => {
-  const { i18n } = useTranslation();
   const queryClient = useQueryClient();
   const queryKey = [UserSettingApiAction.UserInfo] as const;
   const cachedInitialData = queryClient.getQueryData<IUserInfo>(queryKey);
@@ -70,13 +68,6 @@ export const useFetchUserInfo = (): ResponseGetType<IUserInfo> => {
         const { data } = await userService.user_info();
         if (data.code === 0) {
           const userInfo = data?.data ?? ({} as IUserInfo);
-          if (userInfo.language) {
-            i18n.changeLanguage(
-              LanguageTranslationMap[
-                userInfo.language as keyof typeof LanguageTranslationMap
-              ],
-            );
-          }
           return userInfo;
         }
       } catch {
