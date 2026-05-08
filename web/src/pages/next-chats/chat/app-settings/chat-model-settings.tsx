@@ -6,6 +6,8 @@ export function ChatModelSettings() {
       <LlmSettingFieldItems
         prefix="llm_setting"
         llmId="llm_id"
+        showFreedom={false}
+        showFields={[]}
       ></LlmSettingFieldItems>
     </div>
   );

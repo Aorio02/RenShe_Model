@@ -17,12 +17,14 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { Authorization } from '@/constants/authorization';
 
 import {
   useGetChatSearchParams,
   useRemoveConversation,
 } from '@/hooks/use-chat-request';
 import { IConversation } from '@/interfaces/database/chat';
+import { getAuthorization } from '@/utils/authorization-util';
 import { Trash2, Download } from 'lucide-react';
 import { MouseEventHandler, PropsWithChildren, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -46,6 +48,32 @@ export function ConversationDropdown({
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [idCardNumber, setIdCardNumber] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+
+  const parseContentDispositionFilename = useCallback(
+    (disposition: string | null) => {
+      const fallback = `${conversation.name || 'conversation'}.pdf`;
+      if (!disposition) {
+        return fallback;
+      }
+
+      const filenameStarMatch = disposition.match(/filename\*\s*=\s*UTF-8''([^;\n]+)/i);
+      if (filenameStarMatch?.[1]) {
+        try {
+          return decodeURIComponent(filenameStarMatch[1]);
+        } catch (error) {
+          console.warn('Failed to decode filename*', error);
+        }
+      }
+
+      const filenameMatch = disposition.match(/filename\s*=\s*("?)([^";\n]+)\1/i);
+      if (filenameMatch?.[2]) {
+        return filenameMatch[2];
+      }
+
+      return fallback;
+    },
+    [conversation.name],
+  );
 
   const handleDelete: MouseEventHandler<HTMLDivElement> =
     useCallback(async () => {
@@ -112,6 +140,7 @@ export function ConversationDropdown({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          [Authorization]: getAuthorization(),
         },
         body: JSON.stringify({
           conversation_id: conversation.id,
@@ -148,14 +177,7 @@ export function ConversationDropdown({
       a.href = url;
       
       const disposition = response.headers.get('Content-Disposition');
-      let filename = `${conversation.name}_export.json`;
-      if (disposition && disposition.indexOf('attachment') !== -1) {
-        const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-        const matches = filenameRegex.exec(disposition);
-        if (matches != null && matches[1]) { 
-          filename = matches[1].replace(/['"]/g, '');
-        }
-      }
+      const filename = parseContentDispositionFilename(disposition);
       
       a.download = filename;
       document.body.appendChild(a);
@@ -184,7 +206,14 @@ export function ConversationDropdown({
     } finally {
       setIsExporting(false);
     }
-  }, [conversation.id, conversation.name, idCardNumber, t, handleCloseExportDialog]);
+  }, [
+    conversation.id,
+    idCardNumber,
+    t,
+    handleCloseExportDialog,
+    exportType,
+    parseContentDispositionFilename,
+  ]);
 
   return (
     <>

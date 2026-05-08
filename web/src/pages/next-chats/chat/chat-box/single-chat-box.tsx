@@ -145,6 +145,7 @@ export function SingleChatBox({
         disabled={disabled}
         sendDisabled={sendDisabled}
         sendLoading={sendLoading}
+        showUploadIcon={false}
         value={value}
         onInputChange={handleInputChange}
         onPressEnter={handlePressEnter}

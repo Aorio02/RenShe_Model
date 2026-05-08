@@ -87,8 +87,9 @@ const ChatCard = forwardRef(function ChatCard(
   const { id: dialogId } = useParams();
   const { setDialog } = useSetDialog();
 
-  const { regenerateMessage, removeMessageById, handleGenerateTable } =
-    useSendMessage(controllerRef);
+  const { regenerateMessage, removeMessageById } = useSendMessage(
+    controllerRef,
+  );
 
   const messageContainerRef = useRef<HTMLDivElement>(null);
 
@@ -258,6 +259,7 @@ export function MultipleChatBox({
           disabled={disabled}
           sendDisabled={sendDisabled}
           sendLoading={sendLoading}
+          showUploadIcon={false}
           value={value}
           onInputChange={handleInputChange}
           onPressEnter={handlePressEnter}

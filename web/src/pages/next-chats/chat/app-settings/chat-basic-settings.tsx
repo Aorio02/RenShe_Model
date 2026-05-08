@@ -1,11 +1,8 @@
 'use client';
 
-import { AvatarUpload } from '@/components/avatar-upload';
 import { KnowledgeBaseFormField } from '@/components/knowledge-base-item';
 import { MetadataFilter } from '@/components/metadata-filter';
 import { SwitchFormField } from '@/components/switch-fom-field';
-import { TavilyFormField } from '@/components/tavily-form-field';
-import { TOCEnhanceFormField } from '@/components/toc-enhance-form-field';
 import {
   FormControl,
   FormField,
@@ -13,7 +10,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useTranslate } from '@/hooks/common-hooks';
 import { useFormContext } from 'react-hook-form';
@@ -101,17 +97,10 @@ export default function ChatBasicSetting() {
         tooltip={t('quoteTip')}
       ></SwitchFormField>
       <SwitchFormField
-        name={'prompt_config.keyword'}
-        label={t('keyword')}
-        tooltip={t('keywordTip')}
-      ></SwitchFormField>
-      <SwitchFormField
         name={'prompt_config.tts'}
         label={t('tts')}
         tooltip={t('ttsTip')}
       ></SwitchFormField>
-      <TOCEnhanceFormField name="prompt_config.toc_enhance"></TOCEnhanceFormField>
-      {/* <TavilyFormField></TavilyFormField> */}
       <KnowledgeBaseFormField></KnowledgeBaseFormField>
       <MetadataFilter></MetadataFilter>
     </div>

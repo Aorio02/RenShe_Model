@@ -55,6 +55,18 @@ export function ChatList({
           initialName={initialChatName}
           loading={chatRenameLoading}
           title={initialChatName || t('chat.createChat')}
+          nameLabel={
+            initialChatName
+              ? undefined
+              : t('chat.personName', { defaultValue: t('common.name') })
+          }
+          namePlaceholder={
+            initialChatName
+              ? undefined
+              : t('chat.personNamePlaceholder', {
+                  defaultValue: t('common.namePlaceholder'),
+                })
+          }
         ></RenameDialog>
       )}
     </>

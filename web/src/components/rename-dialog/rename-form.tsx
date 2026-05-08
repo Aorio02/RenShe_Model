@@ -23,17 +23,23 @@ export function RenameForm({
   hideModal,
   onOk,
   initialIdCard,
+  nameLabel,
+  namePlaceholder,
 }: IModalProps<any> & {
   initialName?: string;
   initialIdCard?: string;
+  nameLabel?: string;
+  namePlaceholder?: string;
 }) {
   const { t } = useTranslation();
+  const resolvedNameLabel = nameLabel ?? t('common.name');
+  const resolvedNamePlaceholder = namePlaceholder ?? t('common.namePlaceholder');
 
   const FormSchema = z.object({
     name: z
       .string()
       .min(1, {
-        message: t('common.namePlaceholder'),
+        message: resolvedNamePlaceholder,
       })
       .trim(),
     idCardNumber: z.string()
@@ -79,10 +85,10 @@ export function RenameForm({
           name="name"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('common.name')}</FormLabel>
+              <FormLabel>{resolvedNameLabel}</FormLabel>
               <FormControl>
                 <Input
-                  placeholder={t('common.namePlaceholder')}
+                  placeholder={resolvedNamePlaceholder}
                   {...field}
                   autoComplete="off"
                 />

@@ -29,6 +29,7 @@ interface LlmSettingFieldItemsProps {
   prefix?: string;
   options?: any[];
   llmId?: string;
+  showFreedom?: boolean;
   showFields?: Array<
     | 'temperature'
     | 'top_p'
@@ -67,6 +68,7 @@ export const LlmSettingSchema = {
 export function LlmSettingFieldItems({
   prefix,
   options,
+  showFreedom = true,
   showFields = [
     'temperature',
     'top_p',
@@ -135,36 +137,38 @@ export function LlmSettingFieldItems({
         options={options}
         name={llmId ?? getFieldWithPrefix('llm_id')}
       ></LLMFormField>
-      <FormField
-        control={form.control}
-        name={getFieldWithPrefix('parameter')}
-        render={({ field }) => (
-          <FormItem className="flex justify-between items-center">
-            <FormLabel className="flex-1">{t('freedom')}</FormLabel>
-            <FormControl>
-              <Select
-                {...field}
-                onValueChange={(val) => {
-                  handleChange(val);
-                  field.onChange(val);
-                }}
-              >
-                <SelectTrigger className="flex-1 !m-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {parameterOptions.map((x) => (
-                    <SelectItem value={x.value} key={x.value}>
-                      {x.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
+      {showFreedom && (
+        <FormField
+          control={form.control}
+          name={getFieldWithPrefix('parameter')}
+          render={({ field }) => (
+            <FormItem className="flex justify-between items-center">
+              <FormLabel className="flex-1">{t('freedom')}</FormLabel>
+              <FormControl>
+                <Select
+                  {...field}
+                  onValueChange={(val) => {
+                    handleChange(val);
+                    field.onChange(val);
+                  }}
+                >
+                  <SelectTrigger className="flex-1 !m-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {parameterOptions.map((x) => (
+                      <SelectItem value={x.value} key={x.value}>
+                        {x.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      )}
       {showFields.some((item) => item === 'temperature') && (
         <SliderInputSwitchFormField
           name={getFieldWithPrefix('temperature')}

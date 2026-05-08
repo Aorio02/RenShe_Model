@@ -690,6 +690,8 @@ General：实体和关系提取提示来自 GitHub - microsoft/graphrag：基于
       conversations: '会话',
       chatApps: '聊天',
       createChat: '创建聊天',
+      personName: '姓名',
+      personNamePlaceholder: '请输入姓名',
       newConversation: '新会话',
       createAssistant: '新建助理',
       assistantSetting: '助理设置',
