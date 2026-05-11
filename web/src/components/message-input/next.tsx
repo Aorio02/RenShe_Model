@@ -30,6 +30,7 @@ interface IProps {
   uploadMethod?: string;
   isShared?: boolean;
   showUploadIcon?: boolean;
+  showActionLabels?: boolean;
   isUploading?: boolean;
   onPressEnter(...prams: any[]): void;
   onVoiceSubmit?(payload: RecordedVoicePayload): void;
@@ -48,6 +49,7 @@ export function NextMessageInput({
   sendLoading,
   disabled,
   showUploadIcon = true,
+  showActionLabels = false,
   onUpload,
   onInputChange,
   onVoiceSubmit,
@@ -183,29 +185,58 @@ export function NextMessageInput({
               <CircleStop />
             </Button>
           ) : (
-            <div className="flex items-center gap-3">
-              {onVoiceSubmit && <AudioButton onSubmit={onVoiceSubmit} />}
+            <div
+              className={cn('flex items-center', {
+                'gap-3': !showActionLabels,
+                'gap-2': showActionLabels,
+              })}
+            >
+              {onVoiceSubmit && (
+                <AudioButton
+                  onSubmit={onVoiceSubmit}
+                  showLabel={showActionLabels}
+                  label={t('chat.voiceInput', { defaultValue: '语音输入' })}
+                />
+              )}
               {onGenerateTable && (
                 <Button
                   type="button"
-                  size="icon"
                   variant="ghost"
-                  className="size-7 rounded-sm"
+                  size={showActionLabels ? 'default' : 'icon'}
+                  className={cn('rounded-sm', {
+                    'size-7': !showActionLabels,
+                    'h-8 px-3 text-xs': showActionLabels,
+                  })}
                   disabled={sendLoading || isUploading}
                   onClick={onGenerateTable}
                   title={t('chat.generateTable') || '生成业务表格'}
                 >
                   <TableIcon className="size-3.5" />
+                  {showActionLabels && (
+                    <span>
+                      {t('chat.generateTableShort', {
+                        defaultValue: '生成表格',
+                      })}
+                    </span>
+                  )}
                 </Button>
               )}
               <Button
                 type="submit"
-                className="size-5 rounded-sm"
+                className={cn('rounded-sm', {
+                  'size-5': !showActionLabels,
+                  'h-8 px-3 text-xs': showActionLabels,
+                })}
                 disabled={
                   sendDisabled || isUploading || sendLoading || !value.trim()
                 }
               >
                 <Send />
+                {showActionLabels && (
+                  <span>
+                    {t('chat.textInput', { defaultValue: '文字输入' })}
+                  </span>
+                )}
                 <span className="sr-only">Send message</span>
               </Button>
             </div>

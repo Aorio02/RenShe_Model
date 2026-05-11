@@ -13,6 +13,7 @@ from api.db.services.dialog_service import DialogService, async_chat, clean_tts_
 from api.db.services.external_asr_service import ExternalASRService
 from api.db.services.voice_storage_service import VoiceStorageService
 from api.db.services.llm_service import LLMBundle
+from api.utils.audio_utils import build_audio_filename, resolve_audio_mime_type
 from common.constants import LLMType
 from common.misc_utils import get_uuid
 
@@ -696,12 +697,22 @@ class VoiceChatService:
             raise LookupError("Voice blob not found!")
 
         blob = VoiceStorageService.get_blob(conv.user_id or user_id, file_id)
-        mime_type = voice.get("mime_type", "audio/webm")
-        filename = file_id.split("/")[-1] or "voice.webm"
+        mime_type = resolve_audio_mime_type(
+            blob,
+            voice.get("mime_type"),
+            default="audio/webm",
+        )
+        filename = build_audio_filename(
+            file_id.split("/")[-1] or "voice.webm",
+            mime_type,
+            default_stem="voice",
+            blob=blob,
+        )
 
         transcript = await ExternalASRService.transcribe(blob, filename, mime_type)
         message["content"] = transcript
         message.setdefault("voice", {})["status"] = "ready"
+        message["voice"]["mime_type"] = mime_type
         message["voice"].pop("error", None)
         message["created_at"] = _now_ts()
         conv.message[idx] = message
@@ -905,19 +916,44 @@ class VoiceChatService:
     ) -> AsyncGenerator[dict[str, Any], None]:
         conv = cls._load_conversation(conversation_id, user_id)
         dialog = cls._load_dialog(conv)
+        normalized_mime_type = _normalize_audio_mime_type(
+            mime_type,
+            default="audio/webm",
+        )
+        resolved_mime_type = resolve_audio_mime_type(
+            audio_bytes,
+            normalized_mime_type,
+            default="audio/webm",
+        )
+        resolved_filename = build_audio_filename(
+            filename,
+            resolved_mime_type,
+            default_stem="voice-message",
+            blob=audio_bytes,
+        )
+        if resolved_mime_type != normalized_mime_type:
+            logging.info(
+                "voice upload mime mismatch corrected: declared=%s detected=%s filename=%s conversation=%s message=%s",
+                normalized_mime_type,
+                resolved_mime_type,
+                filename,
+                conversation_id,
+                client_message_id,
+            )
 
         file_id = VoiceStorageService.build_user_voice_key(
             conversation_id,
             client_message_id,
-            filename,
-            mime_type,
+            resolved_filename,
+            resolved_mime_type,
+            audio_bytes,
         )
         VoiceStorageService.save_blob(user_id, file_id, audio_bytes)
 
         user_message = _build_user_voice_message(
             client_message_id,
             file_id,
-            mime_type or "audio/webm",
+            resolved_mime_type,
             duration_ms,
             waveform,
         )
@@ -934,10 +970,15 @@ class VoiceChatService:
         )
 
         try:
-            transcript = await ExternalASRService.transcribe(audio_bytes, filename, mime_type)
+            transcript = await ExternalASRService.transcribe(
+                audio_bytes,
+                resolved_filename,
+                resolved_mime_type,
+            )
             idx = _message_index(conv, client_message_id)
             conv.message[idx]["content"] = transcript
             conv.message[idx]["voice"]["status"] = "ready"
+            conv.message[idx]["voice"]["mime_type"] = resolved_mime_type
             conv.message[idx]["voice"].pop("error", None)
             conv.message[idx]["created_at"] = _now_ts()
             _persist_conversation(conv)
@@ -1053,30 +1094,44 @@ class VoiceChatService:
         voice = message.get("voice") or {}
         if voice.get("kind") == "single":
             file_id = voice.get("file_id")
-            mime_type = voice.get("mime_type", "audio/webm")
             if not file_id:
                 raise LookupError("Voice blob not found!")
-            return VoiceStorageService.get_blob(conv.user_id or user_id, file_id), mime_type
+            blob = VoiceStorageService.get_blob(conv.user_id or user_id, file_id)
+            mime_type = resolve_audio_mime_type(
+                blob,
+                voice.get("mime_type"),
+                default="audio/webm",
+            )
+            return blob, mime_type
 
         if seq is None and voice.get("file_id"):
-            return (
-                VoiceStorageService.get_blob(conv.user_id or user_id, voice["file_id"]),
-                voice.get("mime_type", DEFAULT_TTS_MIME_TYPE),
+            blob = VoiceStorageService.get_blob(conv.user_id or user_id, voice["file_id"])
+            mime_type = resolve_audio_mime_type(
+                blob,
+                voice.get("mime_type"),
+                default=DEFAULT_TTS_MIME_TYPE,
             )
+            return blob, mime_type
 
         segments = voice.get("segments") or []
         if seq is None:
             if len(segments) == 1:
                 segment = segments[0]
-                return (
-                    VoiceStorageService.get_blob(conv.user_id or user_id, segment["file_id"]),
-                    segment.get("mime_type", "audio/mpeg"),
+                blob = VoiceStorageService.get_blob(conv.user_id or user_id, segment["file_id"])
+                mime_type = resolve_audio_mime_type(
+                    blob,
+                    segment.get("mime_type"),
+                    default="audio/mpeg",
                 )
+                return blob, mime_type
             raise LookupError("Segment seq is required")
         segment = next((item for item in segments if int(item.get("seq", -1)) == int(seq)), None)
         if not segment:
             raise LookupError("Voice segment not found!")
-        return (
-            VoiceStorageService.get_blob(conv.user_id or user_id, segment["file_id"]),
-            segment.get("mime_type", "audio/mpeg"),
+        blob = VoiceStorageService.get_blob(conv.user_id or user_id, segment["file_id"])
+        mime_type = resolve_audio_mime_type(
+            blob,
+            segment.get("mime_type"),
+            default="audio/mpeg",
         )
+        return blob, mime_type

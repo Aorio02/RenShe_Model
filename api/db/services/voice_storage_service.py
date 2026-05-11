@@ -1,32 +1,18 @@
-import os
-
 from api.db.services.file_service import FileService
+from api.utils.audio_utils import guess_audio_extension
 
 
 class VoiceStorageService:
     USER_AUDIO_PREFIX = "voice"
 
     @staticmethod
-    def _guess_extension(filename: str | None, mime_type: str | None, default: str) -> str:
-        if filename and "." in filename:
-            ext = os.path.splitext(filename)[1].lower()
-            if ext:
-                return ext
-        if mime_type:
-            ext_map = {
-                "audio/webm": ".webm",
-                "audio/mpeg": ".mp3",
-                "audio/mp3": ".mp3",
-                "audio/wav": ".wav",
-                "audio/x-wav": ".wav",
-                "audio/ogg": ".ogg",
-                "audio/mp4": ".m4a",
-                "audio/aac": ".aac",
-                "audio/flac": ".flac",
-            }
-            if mime_type in ext_map:
-                return ext_map[mime_type]
-        return default
+    def _guess_extension(
+        filename: str | None,
+        mime_type: str | None,
+        default: str,
+        blob: bytes | None = None,
+    ) -> str:
+        return guess_audio_extension(filename, mime_type, default, blob)
 
     @classmethod
     def build_user_voice_key(
@@ -35,8 +21,9 @@ class VoiceStorageService:
         message_id: str,
         filename: str | None,
         mime_type: str | None,
+        blob: bytes | None = None,
     ) -> str:
-        ext = cls._guess_extension(filename, mime_type, ".webm")
+        ext = cls._guess_extension(filename, mime_type, ".webm", blob)
         return f"{cls.USER_AUDIO_PREFIX}/{conversation_id}/{message_id}/user{ext}"
 
     @classmethod

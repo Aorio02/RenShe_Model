@@ -167,10 +167,28 @@ export interface RecordedVoicePayload {
   waveform: number[];
 }
 
+const normalizeRecordedMimeType = (
+  mimeType: string | null | undefined,
+  fallback = 'audio/webm',
+) => {
+  const normalized = (mimeType || '').split(';', 1)[0].trim().toLowerCase();
+  if (normalized.startsWith('video/webm')) {
+    return 'audio/webm';
+  }
+  if (normalized.startsWith('video/mp4')) {
+    return 'audio/mp4';
+  }
+  return normalized || fallback;
+};
+
 export const AudioButton = ({
   onSubmit,
+  showLabel = false,
+  label,
 }: {
-  onSubmit?: (payload: RecordedVoicePayload) => void;
+  onSubmit?: (payload: RecordedVoicePayload) => Promise<void> | void;
+  showLabel?: boolean;
+  label?: string;
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -182,10 +200,11 @@ export const AudioButton = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const intervalRef = useRef<number | null>(null);
-  const currentMimeTypeRef = useRef<string>('audio/webm');
+  const currentMimeTypeRef = useRef<string>('');
   const recordingStartedAtRef = useRef<number>(0);
   const isPressingRef = useRef(false);
   const stopPressedRecordingRef = useRef<() => void>(() => {});
+  const activePointerIdRef = useRef<number | null>(null);
 
   const cleanup = useCallback(() => {
     if (intervalRef.current) {
@@ -202,6 +221,8 @@ export const AudioButton = ({
       mediaRecorderRef.current.onerror = null;
       mediaRecorderRef.current = null;
     }
+    currentMimeTypeRef.current = '';
+    activePointerIdRef.current = null;
   }, []);
 
   const stopRecording = useCallback(() => {
@@ -227,11 +248,16 @@ export const AudioButton = ({
         ? Date.now() - recordingStartedAtRef.current
         : recordingTime * 1000,
     );
-    const actualType = currentMimeTypeRef.current || 'audio/webm';
-    const blob = new Blob(audioChunksRef.current, { type: actualType });
+    const chunkMimeType = audioChunksRef.current.find((chunk) => chunk.type)?.type;
+    const recordedMimeType = normalizeRecordedMimeType(
+      chunkMimeType || currentMimeTypeRef.current || 'audio/webm',
+    );
+    const rawBlob = new Blob(audioChunksRef.current, {
+      type: recordedMimeType,
+    });
     cleanup();
 
-    if (blob.size < 100) {
+    if (rawBlob.size < 100) {
       toast.error('录音数据为空，请重试');
       setIsProcessing(false);
       setPopoverOpen(false);
@@ -240,14 +266,14 @@ export const AudioButton = ({
 
     setIsProcessing(true);
     try {
-      onSubmit?.({
-        blob,
-        mimeType: actualType,
+      setPopoverOpen(false);
+      setRecordingTime(0);
+      await onSubmit?.({
+        blob: rawBlob,
+        mimeType: recordedMimeType,
         durationMs,
         waveform: [],
       });
-      setPopoverOpen(false);
-      setRecordingTime(0);
     } finally {
       setIsProcessing(false);
       recordingStartedAtRef.current = 0;
@@ -300,13 +326,19 @@ export const AudioButton = ({
         throw new Error('当前浏览器不支持任何已知的音频录制格式');
       }
 
-      currentMimeTypeRef.current = selectedMimeType;
+      if (!selectedMimeType) {
+        throw new Error('当前浏览器不支持任何已知的音频录制格式');
+      }
 
       const recorder = new MediaRecorder(stream, { mimeType: selectedMimeType });
       mediaRecorderRef.current = recorder;
+      currentMimeTypeRef.current = normalizeRecordedMimeType(selectedMimeType);
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
+          if (event.data.type) {
+            currentMimeTypeRef.current = normalizeRecordedMimeType(event.data.type);
+          }
           audioChunksRef.current.push(event.data);
         }
       };
@@ -362,7 +394,11 @@ export const AudioButton = ({
     }
   }, [cleanup, handleRecordingStop]);
 
-  const handleGlobalMouseUp = useCallback(() => {
+  const handleGlobalPointerUp = useCallback(() => {
+    stopPressedRecordingRef.current();
+  }, []);
+
+  const handleGlobalPointerCancel = useCallback(() => {
     stopPressedRecordingRef.current();
   }, []);
 
@@ -377,10 +413,16 @@ export const AudioButton = ({
   }, []);
 
   const removeGlobalReleaseListeners = useCallback(() => {
-    window.removeEventListener('mouseup', handleGlobalMouseUp);
+    window.removeEventListener('pointerup', handleGlobalPointerUp);
+    window.removeEventListener('pointercancel', handleGlobalPointerCancel);
     window.removeEventListener('blur', handleWindowBlur);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [handleGlobalMouseUp, handleVisibilityChange, handleWindowBlur]);
+  }, [
+    handleGlobalPointerCancel,
+    handleGlobalPointerUp,
+    handleVisibilityChange,
+    handleWindowBlur,
+  ]);
 
   const handlePressEnd = useCallback(() => {
     if (!isPressingRef.current && mediaRecorderRef.current?.state !== 'recording') {
@@ -404,13 +446,26 @@ export const AudioButton = ({
   }, [cleanup, removeGlobalReleaseListeners]);
 
   return (
-    <div className="relative w-6 h-6 flex items-center justify-center">
+    <div
+      className={cn('relative flex items-center justify-center', {
+        'h-6 w-6': !showLabel,
+        'h-8': showLabel,
+      })}
+    >
       {isRecording && (
-        <div className="absolute inset-0 rounded-full border-2 border-state-success-500 animate-ping opacity-75" />
+        <div
+          className={cn(
+            'absolute inset-0 border-2 border-state-success-500 animate-ping opacity-75',
+            {
+              'rounded-full': !showLabel,
+              'rounded-md': showLabel,
+            },
+          )}
+        />
       )}
 
       {isRecording && (
-        <div className="absolute inset-0 w-full h-6 rounded-md overflow-hidden flex items-center justify-center p-1 z-10 pointer-events-none">
+        <div className="absolute inset-0 z-10 flex h-full w-full items-center justify-center overflow-hidden rounded-md p-1 pointer-events-none">
           <VoiceVisualizer
             stream={mediaStreamRef.current}
             isRecording={isRecording}
@@ -431,17 +486,33 @@ export const AudioButton = ({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            onMouseDown={(e) => {
+            size={showLabel ? 'default' : 'sm'}
+            onPointerDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              if (e.button !== 0 || isProcessing || isStarting || isRecording) {
+              if (
+                !e.isPrimary ||
+                (e.pointerType === 'mouse' && e.button !== 0) ||
+                isProcessing ||
+                isStarting ||
+                isRecording
+              ) {
                 return;
               }
 
               isPressingRef.current = true;
+              activePointerIdRef.current = e.pointerId;
+              try {
+                e.currentTarget.setPointerCapture(e.pointerId);
+              } catch {
+                // Pointer capture is a best-effort enhancement.
+              }
               removeGlobalReleaseListeners();
-              window.addEventListener('mouseup', handleGlobalMouseUp);
+              window.addEventListener('pointerup', handleGlobalPointerUp);
+              window.addEventListener(
+                'pointercancel',
+                handleGlobalPointerCancel,
+              );
               window.addEventListener('blur', handleWindowBlur);
               document.addEventListener(
                 'visibilitychange',
@@ -454,7 +525,9 @@ export const AudioButton = ({
               e.stopPropagation();
             }}
             className={cn(
-              'w-6 h-6 p-0 rounded-md border-none transition-all duration-200',
+              'rounded-md border-none transition-all duration-200',
+              'touch-none select-none',
+              showLabel ? 'h-8 px-3 text-xs' : 'h-6 w-6 p-0',
               isRecording
                 ? 'bg-state-success-100 text-state-success hover:bg-state-success-200'
                 : 'hover:bg-muted text-muted-foreground hover:text-foreground',
@@ -470,6 +543,7 @@ export const AudioButton = ({
             ) : (
               <Mic size={16} />
             )}
+            {showLabel && <span>{label ?? '语音输入'}</span>}
           </Button>
         </PopoverTrigger>
 

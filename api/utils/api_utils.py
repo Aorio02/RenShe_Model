@@ -29,6 +29,7 @@ import requests
 from quart import (
     Response,
     jsonify,
+    current_app,
     request
 )
 from werkzeug.exceptions import BadRequest as WerkzeugBadRequest
@@ -50,6 +51,16 @@ from common.constants import RetCode
 from common import settings
 
 requests.models.complexjson.dumps = functools.partial(json.dumps, cls=CustomJSONEncoder)
+
+
+def _json_response(payload: dict, status_code: int | None = None):
+    response = current_app.response_class(
+        json.dumps(payload, cls=CustomJSONEncoder, ensure_ascii=False),
+        mimetype="application/json",
+    )
+    if status_code is not None:
+        response.status_code = status_code
+    return response
 
 
 async def _coerce_request_data() -> dict:
@@ -119,7 +130,7 @@ def get_data_error_result(code=RetCode.DATA_ERROR, message="Sorry! Data missing!
             continue
         else:
             response[key] = value
-    return jsonify(response)
+    return _json_response(response)
 
 
 def server_error_response(e):
@@ -225,7 +236,7 @@ def active_required(func):
 
 def get_json_result(code: RetCode = RetCode.SUCCESS, message="success", data=None):
     response = {"code": code, "message": message, "data": data}
-    return jsonify(response)
+    return _json_response(response)
 
 
 def apikey_required(func):
@@ -246,16 +257,14 @@ def apikey_required(func):
 
 def build_error_result(code=RetCode.FORBIDDEN, message="success"):
     response = {"code": code, "message": message}
-    response = jsonify(response)
-    response.status_code = code
-    return response
+    return _json_response(response, status_code=code)
 
 
 def construct_json_result(code: RetCode = RetCode.SUCCESS, message="success", data=None):
     if data is None:
-        return jsonify({"code": code, "message": message})
+        return _json_response({"code": code, "message": message})
     else:
-        return jsonify({"code": code, "message": message, "data": data})
+        return _json_response({"code": code, "message": message, "data": data})
 
 
 def token_required(func):

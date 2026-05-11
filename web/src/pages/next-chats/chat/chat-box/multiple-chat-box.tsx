@@ -260,10 +260,10 @@ export function MultipleChatBox({
           sendDisabled={sendDisabled}
           sendLoading={sendLoading}
           showUploadIcon={false}
+          showActionLabels
           value={value}
           onInputChange={handleInputChange}
           onPressEnter={handlePressEnter}
-          onGenerateTable={handleGenerateTable}
           conversationId={conversationId}
           createConversationBeforeUploadDocument={
             createConversationBeforeUploadDocument

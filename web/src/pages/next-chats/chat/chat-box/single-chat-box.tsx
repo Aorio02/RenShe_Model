@@ -19,6 +19,79 @@ import { useCreateConversationBeforeUploadDocument } from '../../hooks/use-creat
 import { useSendMessage } from '../../hooks/use-send-chat-message';
 import { buildMessageItemReference } from '../../utils';
 
+const mergeVoiceMeta = (previousVoice: any, incomingVoice: any) => {
+  if (!incomingVoice) {
+    return previousVoice;
+  }
+
+  if (incomingVoice.kind === 'segments') {
+    const previousSegments =
+      previousVoice?.kind === 'segments' ? previousVoice.segments ?? [] : [];
+
+    return {
+      ...(previousVoice?.kind === 'segments' ? previousVoice : {}),
+      ...incomingVoice,
+      kind: 'segments' as const,
+      file_id: undefined,
+      local_url: undefined,
+      segments: (incomingVoice.segments ?? []).map((segment: any) => {
+        const previousSegment = previousSegments.find(
+          (item: any) => item.seq === segment.seq,
+        );
+        return {
+          ...segment,
+          object_url: segment.file_id
+            ? undefined
+            : segment.object_url ?? previousSegment?.object_url,
+        };
+      }),
+    };
+  }
+
+  return {
+    ...(previousVoice ?? {}),
+    ...incomingVoice,
+    kind: 'single' as const,
+    segments: undefined,
+    local_url: incomingVoice.local_url ?? previousVoice?.local_url,
+  };
+};
+
+const mergeMessagesWithLocalVoice = (
+  previous: IClientConversation['message'],
+  incoming: IClientConversation['message'],
+) => {
+  const previousMap = new Map(
+    previous.map((message) => [`${message.role}:${message.id}`, message]),
+  );
+
+  const nextMessages = incoming.map((message) => {
+    const previousMessage = previousMap.get(`${message.role}:${message.id}`);
+    if (!previousMessage) {
+      return message;
+    }
+
+    return {
+      ...previousMessage,
+      ...message,
+      voice: mergeVoiceMeta(previousMessage.voice, message.voice),
+    };
+  });
+
+  const nextKeys = new Set(
+    nextMessages.map((message) => `${message.role}:${message.id}`),
+  );
+
+  previous.forEach((message) => {
+    const key = `${message.role}:${message.id}`;
+    if (!nextKeys.has(key)) {
+      nextMessages.push(message);
+    }
+  });
+
+  return nextMessages;
+};
+
 interface IProps {
   controllerRef: MutableRefObject<AbortController>;
   stopOutputMessage(): void;
@@ -69,23 +142,18 @@ export function SingleChatBox({
       setDerivedMessages((previous) => {
         const switchedConversation =
           hydratedConversationIdRef.current !== serverConversationId;
-        const alreadyShowingTargetConversation = previous.some(
+        const sameConversationMessages = previous.filter(
           (message) => message.conversationId === serverConversationId,
         );
         hydratedConversationIdRef.current = serverConversationId;
 
-        if (
-          alreadyShowingTargetConversation &&
-          previous.length >= messages.length
-        ) {
-          return previous;
-        }
-
         if (switchedConversation || previous.length === 0) {
-          return messages;
+          return sameConversationMessages.length > 0
+            ? mergeMessagesWithLocalVoice(sameConversationMessages, messages)
+            : messages;
         }
 
-        return previous;
+        return mergeMessagesWithLocalVoice(previous, messages);
       });
     }
   }, [conversation?.id, conversation?.message, setDerivedMessages]);
@@ -146,6 +214,7 @@ export function SingleChatBox({
         sendDisabled={sendDisabled}
         sendLoading={sendLoading}
         showUploadIcon={false}
+        showActionLabels
         value={value}
         onInputChange={handleInputChange}
         onPressEnter={handlePressEnter}

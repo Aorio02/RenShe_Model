@@ -78,7 +78,7 @@ const mergeVoiceMeta = (
     ...incomingVoice,
     kind: 'single' as const,
     segments: undefined,
-    local_url: incomingVoice.file_id ? undefined : previousVoice?.local_url,
+    local_url: incomingVoice.local_url ?? previousVoice?.local_url,
   };
 };
 
@@ -97,6 +97,11 @@ const getVoiceFileExtension = (mimeType: string) => {
   };
 
   return extensionMap[normalizedType] || 'webm';
+};
+
+const normalizeVoiceMimeType = (mimeType: string) => {
+  const normalizedType = mimeType.split(';', 1)[0].trim().toLowerCase();
+  return normalizedType || 'audio/webm';
 };
 
 export const useSelectNextMessages = () => {
@@ -734,6 +739,9 @@ export const useSendMessage = (
         return;
       }
 
+      const normalizedMimeType = normalizeVoiceMimeType(payload.mimeType);
+      const localUrl = URL.createObjectURL(payload.blob);
+
       const { targetConversationId } = data;
       const clientMessageId = buildMessageUuid({
         id: uuid(),
@@ -749,18 +757,19 @@ export const useSendMessage = (
         voice: {
           kind: 'single',
           status: 'transcribing',
-          mime_type: payload.mimeType,
+          local_url: localUrl,
+          mime_type: normalizedMimeType,
           duration_ms: payload.durationMs,
           waveform: payload.waveform,
         },
       });
 
-      const fileExtension = getVoiceFileExtension(payload.mimeType);
+      const fileExtension = getVoiceFileExtension(normalizedMimeType);
       const audioFile = new File(
         [payload.blob],
         `voice-message.${fileExtension}`,
         {
-          type: payload.mimeType,
+          type: normalizedMimeType,
         },
       );
       const formData = new FormData();
@@ -768,7 +777,7 @@ export const useSendMessage = (
       formData.append('client_message_id', clientMessageId);
       formData.append('file', audioFile);
       formData.append('duration_ms', `${payload.durationMs}`);
-      formData.append('mime_type', payload.mimeType);
+      formData.append('mime_type', normalizedMimeType);
       formData.append('waveform', JSON.stringify(payload.waveform ?? []));
 
       const result = await streamVoiceRequest({
@@ -875,6 +884,7 @@ export const useSendMessage = (
     currentDialog?.prompt_config?.tts,
     sendMessage,
     addAutoPlayEligibleAssistant,
+    value,
   ]);
 
   useEffect(() => {

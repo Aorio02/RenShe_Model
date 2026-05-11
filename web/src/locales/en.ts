@@ -863,6 +863,9 @@ This auto-tagging feature enhances retrieval by adding another layer of domain-s
       crossLanguage: 'Cross-language search',
       crossLanguageTip: `Select one or more languages for cross‑language search. If no language is selected, the system searches with the original query.`,
       createChat: 'Create chat',
+      voiceInput: 'Voice input',
+      textInput: 'Text input',
+      generateTableShort: 'Generate table',
       metadata: 'Meta data',
       metadataTip:
         'Metadata filtering is the process of using metadata attributes (such as tags, categories, or access permissions) to refine and control the retrieval of relevant information within a system.',

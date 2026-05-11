@@ -28,6 +28,7 @@ from api.db.db_models import APIToken
 from api.db.services.conversation_service import ConversationService, structure_answer
 from api.db.services.dialog_service import DialogService, async_ask, async_chat, clean_tts_text, gen_mindmap
 from api.db.services.llm_service import LLMBundle
+from api.db.services.print_service import ConversationPrintService
 from api.db.services.search_service import SearchService
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.user_service import TenantService, UserTenantService
@@ -37,6 +38,12 @@ from api.db.services.voice_chat_service import (
     split_answer_for_pseudo_stream,
 )
 from api.utils.api_utils import get_data_error_result, get_json_result, get_request_json, server_error_response, validate_request
+from api.utils.conversation_export import (
+    build_download_filename,
+    generate_markdown,
+    generate_table_markdown,
+    markdown_to_pdf_bytes,
+)
 from rag.prompts.template import load_prompt
 from rag.prompts.generator import chunks_format
 from common.constants import RetCode, LLMType
@@ -159,6 +166,29 @@ def _sanitize_conversation_messages(messages, drop_fields):
         _sanitize_conversation_message(message, drop_fields)
         for message in (messages or [])
     ]
+
+
+def _get_owned_conversation(conversation_id: str):
+    ok, conv = ConversationService.get_by_id(conversation_id)
+    if not ok or not conv:
+        return None, get_data_error_result(message="会话不存在")
+
+    if getattr(conv, "user_id", None) and conv.user_id != current_user.id:
+        return None, get_data_error_result(message="无权访问该会话")
+
+    ok, dialog = DialogService.get_by_id(conv.dialog_id)
+    if not ok or not dialog:
+        return None, get_data_error_result(message="对话不存在")
+
+    tenant_id = UserTenantService.get_tenant_id_by_user_id(current_user.id)
+    allowed_tenant_ids = {current_user.id}
+    if tenant_id:
+        allowed_tenant_ids.add(tenant_id)
+
+    if getattr(dialog, "tenant_id", None) and dialog.tenant_id not in allowed_tenant_ids:
+        return None, get_data_error_result(message="无权访问该对话")
+
+    return (conv, dialog), None
 
 
 def _normalize_tts_mime_type(mime_type: str | None, default: str = "audio/mpeg") -> str:
@@ -1252,7 +1282,7 @@ Related search terms:
     return get_json_result(data=[re.sub(r"^[0-9]\. ", "", a) for a in ans.split("\n") if re.match(r"^[0-9]\. ", a)])
 
 @manager.route("/export", methods=["POST"])  # noqa: F821
-#@login_required
+@login_required
 @validate_request("conversation_id", "id_card_number")
 async def export_conversation():
     req = await get_request_json()
@@ -1261,13 +1291,10 @@ async def export_conversation():
     export_type = req.get("export_type", "conversation")
     logging.info(f"导出会话 {conversation_id}，用户身份证号 {id_card_number}，导出类型 {export_type}")
 
-    e, conv = ConversationService.get_by_id(conversation_id)
-    if not e:
-        return get_data_error_result(message="会话不存在")
-
-    e, dialog = DialogService.get_by_id(conv.dialog_id)
-    if not e:
-        return get_data_error_result(message="对话不存在")
+    owned, error = _get_owned_conversation(conversation_id)
+    if error:
+        return error
+    conv, dialog = owned
 
     stored_id_card = getattr(dialog, 'id_card_number', None)
     logging.info(f"身份证号验证: 输入={id_card_number}, 存储={stored_id_card}")
@@ -1276,24 +1303,75 @@ async def export_conversation():
         logging.warning(f"身份证号不匹配: 输入={id_card_number}, 存储={stored_id_card}")
         return get_data_error_result(message="身份证号不匹配")
     
-    messages = conv.message
+    messages = conv.message or []
     
     if export_type == "table":
         markdown_content = generate_table_markdown(conv, messages)
     else:
         markdown_content = generate_markdown(messages)
-    
+
     from quart import make_response
-    import urllib.parse
+    _, disposition = build_download_filename(conv.name, ".pdf")
+    pdf_bytes = await asyncio.to_thread(
+        markdown_to_pdf_bytes,
+        markdown_content,
+        getattr(conv, "name", None) or "会话导出",
+    )
 
-    filename_raw = f"{conv.name}.md"
-    filename_encoded = urllib.parse.quote(filename_raw, encoding='utf-8')
-    disposition = f"attachment; filename*=UTF-8''{filename_encoded}; filename={filename_encoded}"
-
-    response = await make_response(markdown_content)
-    response.headers['Content-Type'] = 'text/markdown; charset=utf-8'
-    response.headers['Content-Disposition'] = disposition        
+    response = await make_response(pdf_bytes)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = disposition
     return response
+
+
+@manager.route("/printers", methods=["GET"])  # noqa: F821
+@login_required
+async def list_printers():
+    try:
+        printers = await asyncio.to_thread(ConversationPrintService.list_printers)
+        return get_json_result(data={"printers": printers})
+    except Exception as e:
+        return server_error_response(e)
+
+
+@manager.route("/print", methods=["POST"])  # noqa: F821
+@login_required
+@validate_request("conversation_id", "printer_name")
+async def print_conversation():
+    req = await get_request_json()
+    conversation_id = req["conversation_id"]
+    export_type = req.get("export_type", "conversation")
+    printer_name = req["printer_name"]
+    title = req.get("title")
+    copies = req.get("copies", 1)
+
+    owned, error = _get_owned_conversation(conversation_id)
+    if error:
+        return error
+    conv, _ = owned
+
+    messages = conv.message or []
+    if export_type == "table":
+        markdown_content = generate_table_markdown(conv, messages)
+    else:
+        markdown_content = generate_markdown(messages)
+
+    try:
+        copies = int(copies)
+    except (TypeError, ValueError):
+        copies = 1
+
+    try:
+        result = await asyncio.to_thread(
+            ConversationPrintService.print_markdown,
+            printer_name=printer_name,
+            markdown_content=markdown_content,
+            title=(title or conv.name or "conversation").strip(),
+            copies=max(1, min(copies, 20)),
+        )
+        return get_json_result(data=result)
+    except Exception as e:
+        return server_error_response(e)
 
 def verify_id_card_number(id_card_number):
     """验证身份证号是否正确"""
@@ -1384,92 +1462,3 @@ def extract_birthday_from_id(social_security_number):
         return f"{year}{month}{day}"
     except (ValueError, IndexError):
         return None
-
-def generate_markdown(messages):
-    """将会话消息转换为Markdown格式"""
-    markdown_lines = []
-
-    markdown_lines.append("# 会话导出")
-    markdown_lines.append("")
-
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-
-        if role == "user":
-            markdown_lines.append("## 用户")
-        elif role == "assistant":
-            markdown_lines.append("## 助手")
-        else:
-            markdown_lines.append(f"## {role}")
-
-        markdown_lines.append(content)
-        markdown_lines.append("")
-
-    return "\n".join(markdown_lines)
-
-
-def extract_table_from_messages(messages):
-    """从消息中提取表格内容（Markdown格式的表格）
-       查找所有 assistant 消息中包含完整 Markdown 表格的内容
-    """
-    import re
-
-    def get_content(msg):
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    return item.get("text", "")
-            return str(content) if content else ""
-        return str(content) if content else ""
-
-    logging.info(f"[DEBUG] extract_table_from_messages: 共 {len(messages)} 条消息")
-
-    last_table = None
-    last_table_index = -1
-
-    for i, msg in enumerate(messages):
-        role = msg.get("role", "")
-        content = get_content(msg)
-
-        if role == "assistant" and '|' in content:
-            markdown_table_pattern = r'\|.+\|[\r\n]+\|[-:|\s]+\|[\r\n]+(?:\|.+\|[\r\n]*)+'
-            matches = re.findall(markdown_table_pattern, content, re.MULTILINE)
-            if matches:
-                last_table = matches[0]
-                last_table_index = i
-                logging.info(f"[DEBUG] 消息 {i} 包含表格，长度={len(content)}")
-
-    if last_table:
-        logging.info(f"[DEBUG] 返回消息 {last_table_index} 的表格")
-
-    return last_table
-
-
-def generate_table_markdown(conversation, messages):
-    """生成业务表格导出的Markdown格式"""
-    from datetime import datetime
-
-    markdown_lines = []
-
-    markdown_lines.append("# 业务办理表格")
-    markdown_lines.append("")
-    markdown_lines.append("## 基本信息")
-    markdown_lines.append("")
-    markdown_lines.append(f"- **会话名称**: {conversation.name or '未命名'}")
-    markdown_lines.append(f"- **导出时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    markdown_lines.append("")
-
-    table_content = extract_table_from_messages(messages)
-
-    if table_content:
-        markdown_lines.append("## 业务办理信息")
-        markdown_lines.append("")
-        markdown_lines.append(table_content)
-    else:
-        markdown_lines.append("## 业务办理信息")
-        markdown_lines.append("")
-        markdown_lines.append("*未找到生成的业务表格，请确认是否已点击「生成业务表格」按钮。*")
-
-    return "\n".join(markdown_lines)

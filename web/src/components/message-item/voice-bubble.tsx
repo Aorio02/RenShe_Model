@@ -115,14 +115,39 @@ export function VoiceBubble({
     if (!audio) return;
 
     playbackModeRef.current = 'single';
-    const sourceUrl = voice.file_id
-      ? await fetchRemoteUrl(undefined)
-      : voice.local_url || (await fetchRemoteUrl(undefined));
-    audio.pause();
-    audio.currentTime = 0;
-    audio.src = sourceUrl;
-    audio.load();
-    await audio.play();
+    let lastError: unknown;
+    if (voice.local_url) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.src = voice.local_url;
+        audio.load();
+        await audio.play();
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (voice.file_id) {
+      try {
+        const remoteUrl = await fetchRemoteUrl(undefined);
+        audio.pause();
+        audio.currentTime = 0;
+        audio.src = remoteUrl;
+        audio.load();
+        await audio.play();
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (!voice.local_url && !voice.file_id) {
+      throw new Error('voice source not found');
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('voice play failed');
   }, [fetchRemoteUrl, voice]);
 
   const playSegment = useCallback(

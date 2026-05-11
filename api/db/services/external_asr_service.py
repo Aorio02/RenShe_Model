@@ -3,6 +3,7 @@ import os
 import re
 
 import requests
+from api.utils.audio_utils import build_audio_filename, resolve_audio_mime_type
 
 
 class ExternalASRService:
@@ -29,11 +30,29 @@ class ExternalASRService:
             key, value = auth_value.split(":", 1)
             headers[key.strip()] = value.strip()
 
+        resolved_mime_type = resolve_audio_mime_type(
+            audio_bytes,
+            mime_type,
+            "application/octet-stream",
+        )
+        resolved_filename = build_audio_filename(
+            filename,
+            resolved_mime_type,
+            default_stem="voice",
+            blob=audio_bytes,
+        )
+
         def _request() -> requests.Response:
             return requests.post(
                 url,
                 headers=headers,
-                files={"file": (filename, audio_bytes, mime_type or "application/octet-stream")},
+                files={
+                    "file": (
+                        resolved_filename,
+                        audio_bytes,
+                        resolved_mime_type,
+                    )
+                },
                 timeout=timeout_ms / 1000,
             )
 
