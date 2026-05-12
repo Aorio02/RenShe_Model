@@ -51,6 +51,7 @@ export const useSelectDerivedConversationList = () => {
               {
                 content: prologue,
                 role: MessageType.Assistant,
+                id: conversationId,
               },
             ],
           } as any,

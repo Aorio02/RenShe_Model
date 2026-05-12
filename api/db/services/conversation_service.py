@@ -170,7 +170,12 @@ async def async_completion(tenant_id, chat_id, question, name="New session", ses
             "id": session_id,
             "dialog_id": chat_id,
             "name": name,
-            "message": [{"role": "assistant", "content": dia[0].prompt_config.get("prologue"), "created_at": time.time()}],
+            "message": [{
+                "role": "assistant",
+                "content": dia[0].prompt_config.get("prologue"),
+                "created_at": time.time(),
+                "id": session_id,
+            }],
             "user_id": kwargs.get("user_id", "")
         }
         ConversationService.save(**conv)
@@ -254,7 +259,12 @@ async def async_iframe_completion(dialog_id, question, session_id=None, stream=T
             "id": session_id,
             "dialog_id": dialog_id,
             "user_id": kwargs.get("user_id", ""),
-            "message": [{"role": "assistant", "content": dia.prompt_config["prologue"], "created_at": time.time()}]
+            "message": [{
+                "role": "assistant",
+                "content": dia.prompt_config["prologue"],
+                "created_at": time.time(),
+                "id": session_id,
+            }]
         }
         API4ConversationService.save(**conv)
         yield "data:" + json.dumps({"code": 0, "message": "",

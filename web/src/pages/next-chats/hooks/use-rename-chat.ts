@@ -42,7 +42,7 @@ export const useRenameChat = () => {
       vector_similarity_weight: 0.3,
       top_n: 8,
       id_card_number: '',
-      kb_ids: ["e07c00281b6711f1a6bf93a9f5ab70b5"],
+      kb_ids: ["c0a1cb4c4d4011f1a10d396579261294"],
     }),
     [t, tenantInfo.data.llm_id],
   );

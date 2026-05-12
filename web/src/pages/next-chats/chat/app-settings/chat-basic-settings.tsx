@@ -1,7 +1,6 @@
 'use client';
 
 import { KnowledgeBaseFormField } from '@/components/knowledge-base-item';
-import { MetadataFilter } from '@/components/metadata-filter';
 import { SwitchFormField } from '@/components/switch-fom-field';
 import {
   FormControl,
@@ -102,7 +101,6 @@ export default function ChatBasicSetting() {
         tooltip={t('ttsTip')}
       ></SwitchFormField>
       <KnowledgeBaseFormField></KnowledgeBaseFormField>
-      <MetadataFilter></MetadataFilter>
     </div>
   );
 }

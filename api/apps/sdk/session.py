@@ -54,11 +54,16 @@ async def create(tenant_id, chat_id):
     dia = DialogService.query(tenant_id=tenant_id, id=req["dialog_id"], status=StatusEnum.VALID.value)
     if not dia:
         return get_error_data_result(message="You do not own the assistant.")
+    session_id = get_uuid()
     conv = {
-        "id": get_uuid(),
+        "id": session_id,
         "dialog_id": req["dialog_id"],
         "name": req.get("name", "New session"),
-        "message": [{"role": "assistant", "content": dia[0].prompt_config.get("prologue")}],
+        "message": [{
+            "role": "assistant",
+            "content": dia[0].prompt_config.get("prologue"),
+            "id": session_id,
+        }],
         "user_id": req.get("user_id", ""),
         "reference": [],
     }
@@ -93,7 +98,7 @@ async def create_agent_session(tenant_id, agent_id):
 
     cvs.dsl = json.loads(str(canvas))
     conv = {"id": session_id, "dialog_id": cvs.id, "user_id": user_id,
-            "message": [{"role": "assistant", "content": canvas.get_prologue()}], "source": "agent", "dsl": cvs.dsl}
+            "message": [{"role": "assistant", "content": canvas.get_prologue(), "id": session_id}], "source": "agent", "dsl": cvs.dsl}
     API4ConversationService.save(**conv)
     conv["agent_id"] = conv.pop("dialog_id")
     return get_result(data=conv)

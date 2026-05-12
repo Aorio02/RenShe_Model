@@ -461,7 +461,11 @@ async def set_conversation():
             "id": conv_id,
             "dialog_id": req["dialog_id"],
             "name": name,
-            "message": [{"role": "assistant", "content": dia.prompt_config["prologue"]}],
+            "message": [{
+                "role": "assistant",
+                "content": dia.prompt_config["prologue"],
+                "id": conv_id,
+            }],
             "user_id": current_user.id,
             "reference": [],
         }

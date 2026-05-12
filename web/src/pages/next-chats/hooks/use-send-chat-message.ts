@@ -125,7 +125,7 @@ export const useSelectNextMessages = () => {
       const nextMessage = {
         role: MessageType.Assistant,
         content: prologue,
-        id: uuid(),
+        id: conversationId || uuid(),
         conversationId: conversationId,
       } as IMessage;
 
@@ -838,9 +838,10 @@ export const useSendMessage = (
       return;
     }
 
+    const tableDisplayText = '正在为您生成关键信息表格';
     const tablePrompt = '根据上面对话信息，生成一个业务办理表格，包含：业务名称、办理条件、所需材料。用 Markdown 表格格式输出。';
 
-    const data = await createConversationBeforeSendMessage(tablePrompt);
+    const data = await createConversationBeforeSendMessage(tableDisplayText);
 
     if (data === undefined) {
       return;
@@ -851,7 +852,7 @@ export const useSendMessage = (
     const id = uuid();
 
     addNewestQuestion({
-      content: tablePrompt,
+      content: tableDisplayText,
       files: [],
       id,
       role: MessageType.User,
