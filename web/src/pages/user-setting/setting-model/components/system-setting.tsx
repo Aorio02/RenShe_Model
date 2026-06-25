@@ -54,12 +54,12 @@ const SystemSetting = ({ onOk, loading }: IProps) => {
 
   useEffect(() => {
     setFormData({
-      llm_id: initialValues.llm_id ?? '',
-      embd_id: initialValues.embd_id ?? '',
-      img2txt_id: initialValues.img2txt_id ?? '',
-      asr_id: initialValues.asr_id ?? '',
-      rerank_id: initialValues.rerank_id ?? '',
-      tts_id: initialValues.tts_id ?? '',
+      llm_id: initialValues?.llm_id ?? '',
+      embd_id: initialValues?.embd_id ?? '',
+      img2txt_id: initialValues?.img2txt_id ?? '',
+      asr_id: initialValues?.asr_id ?? '',
+      rerank_id: initialValues?.rerank_id ?? '',
+      tts_id: initialValues?.tts_id ?? '',
     });
   }, [initialValues]);
 
