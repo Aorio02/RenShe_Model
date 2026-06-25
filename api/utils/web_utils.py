@@ -104,7 +104,7 @@ def html2pdf(
 
 def __send_devtools(driver, cmd, params={}):
     resource = "/session/%s/chromium/send_command_and_get_result" % driver.session_id
-    url = driver.command_executor._url + resource
+    url = driver.command_executor.client_config.remote_server_addr + resource
     body = json.dumps({"cmd": cmd, "params": params})
     response = driver.command_executor._request("POST", url, body)
 

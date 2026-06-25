@@ -90,7 +90,15 @@ export function ChatSettings({ switchSettingVisible }: ChatSettingsProps) {
     };
 
     if (!isEmpty(data)) {
+      const currentKbIds = form.getValues('kb_ids') || [];
       form.reset(nextData as FormSchemaType);
+      // Preserve auto-selected knowledge base if it was set before reset
+      if (currentKbIds.length > 0) {
+        const resetKbIds = form.getValues('kb_ids') || [];
+        if (resetKbIds.length === 0) {
+          form.setValue('kb_ids', currentKbIds);
+        }
+      }
     }
   }, [data, form]);
 

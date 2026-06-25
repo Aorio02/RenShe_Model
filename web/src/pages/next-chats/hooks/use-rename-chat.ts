@@ -1,5 +1,6 @@
 import { useSetModalState } from '@/hooks/common-hooks';
 import { useSetDialog } from '@/hooks/use-chat-request';
+import { useFetchKnowledgeList } from '@/hooks/use-knowledge-request';
 import { useFetchTenantInfo } from '@/hooks/use-user-setting-request';
 import { IDialog } from '@/interfaces/database/chat';
 import { isEmpty, omit } from 'lodash';
@@ -16,6 +17,12 @@ export const useRenameChat = () => {
   const { setDialog, loading } = useSetDialog();
   const { t } = useTranslation();
   const tenantInfo = useFetchTenantInfo();
+  const { list: kbList } = useFetchKnowledgeList(true);
+
+  const defaultKbId = useMemo(() => {
+    const defaultKb = kbList.find((kb: any) => kb.name === '人社项目');
+    return defaultKb?.id || '';
+  }, [kbList]);
 
   const InitialData = useMemo(
     () => ({
@@ -42,9 +49,9 @@ export const useRenameChat = () => {
       vector_similarity_weight: 0.3,
       top_n: 8,
       id_card_number: '',
-      kb_ids: ["c0a1cb4c4d4011f1a10d396579261294"],
+      kb_ids: defaultKbId ? [defaultKbId] : [],
     }),
-    [t, tenantInfo.data.llm_id],
+    [t, tenantInfo.data.llm_id, defaultKbId],
   );
 
   const onChatRenameOk = useCallback(

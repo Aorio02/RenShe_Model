@@ -78,6 +78,21 @@ export function KnowledgeBaseFormField({
   const { datasetOptions, handleDatasetSelectChange } =
     useDisableDifferenceEmbeddingDataset();
 
+  const DEFAULT_KB_NAME = '人社项目';
+
+  // Auto-select default knowledge base when creating a new dialog
+  useEffect(() => {
+    const currentKbIds: string[] = form.getValues('kb_ids') || [];
+    if (currentKbIds.length === 0 && datasetOptions.length > 0) {
+      const defaultKb = datasetOptions.find(
+        (opt) => opt.label === DEFAULT_KB_NAME,
+      );
+      if (defaultKb && defaultKb.value) {
+        form.setValue('kb_ids', [defaultKb.value]);
+      }
+    }
+  }, [datasetOptions, form]);
+
   const nextOptions = buildQueryVariableOptionsByShowVariable(showVariable)();
 
   const knowledgeOptions = datasetOptions;
